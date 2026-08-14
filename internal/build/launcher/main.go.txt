@@ -12,6 +12,7 @@ var (
 	host       = "127.0.0.1"
 	port       = "3080"
 	dshPackage = "@deepseek-ai/dsh"
+	dshVersion = "unknown"
 )
 
 func main() {

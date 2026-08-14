@@ -12,7 +12,7 @@ func TestLoad(t *testing.T) {
 	contents := `version: 1
 output: dist
 cache: .cache
-node: {version: 22.23.2}
+node: {version: 24.19.0}
 dsh: {package: "@deepseek-ai/dsh", version: 0.1.0-rc.6, plugins: []}
 runtime: {mode: gui, host: 127.0.0.1, port: 3080}
 targets:

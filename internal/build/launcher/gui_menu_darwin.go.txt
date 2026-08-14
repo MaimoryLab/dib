@@ -1,0 +1,60 @@
+package main
+
+/*
+#cgo darwin CFLAGS: -x objective-c
+#cgo darwin LDFLAGS: -framework Cocoa
+#import <Cocoa/Cocoa.h>
+#include <stdlib.h>
+
+@interface DSHMenuTarget : NSObject
+@property(nonatomic, copy) NSString *version;
+@end
+
+@implementation DSHMenuTarget
+- (void)showAbout:(id)sender {
+	(void)sender;
+	NSAlert *alert = [[NSAlert alloc] init];
+	[alert setMessageText:@"About DeepSeek Harness"];
+	[alert setInformativeText:[NSString stringWithFormat:@"Version: %@", self.version]];
+	[alert addButtonWithTitle:@"OK"];
+	[alert runModal];
+}
+@end
+
+static DSHMenuTarget *dsh_menu_target;
+
+static void dsh_menu_install(void *handle, const char *version) {
+	(void)handle;
+	dsh_menu_target = [DSHMenuTarget new];
+	dsh_menu_target.version = [NSString stringWithUTF8String:version];
+	NSMenu *main = [NSApp mainMenu];
+	if (main == nil) {
+		main = [[NSMenu alloc] initWithTitle:@"Main Menu"];
+		[NSApp setMainMenu:main];
+	}
+	NSMenuItem *helpItem = [[NSMenuItem alloc] initWithTitle:@"Help" action:nil keyEquivalent:@""];
+	NSMenu *help = [[NSMenu alloc] initWithTitle:@"Help"];
+	NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:@"About DeepSeek Harness" action:@selector(showAbout:) keyEquivalent:@""];
+	[about setTarget:dsh_menu_target];
+	[help addItem:about];
+	[main addItem:helpItem];
+	[main setSubmenu:help forItem:helpItem];
+}
+
+static void dsh_menu_uninstall(void *handle) {
+	(void)handle;
+	[dsh_menu_target release];
+	dsh_menu_target = nil;
+}
+*/
+import "C"
+
+import "unsafe"
+
+func installNativeMenu(handle unsafe.Pointer, version string) {
+	value := C.CString(version)
+	defer C.free(unsafe.Pointer(value))
+	C.dsh_menu_install(handle, value)
+}
+
+func uninstallNativeMenu(handle unsafe.Pointer) { C.dsh_menu_uninstall(handle) }

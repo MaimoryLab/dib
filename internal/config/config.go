@@ -200,7 +200,7 @@ func (cfg Config) validate() error {
 		return errors.New("node.version, dsh.package, and dsh.version are required")
 	}
 	if !nodeVersionPattern.MatchString(cfg.Node.Version) {
-		return errors.New("node.version must be a full numeric version such as 22.23.2")
+		return errors.New("node.version must be a full numeric version such as 24.19.0")
 	}
 	if !packagePattern.MatchString(cfg.DSH.Package) {
 		return errors.New("dsh.package must be an npm package name")

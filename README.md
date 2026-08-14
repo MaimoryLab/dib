@@ -26,11 +26,11 @@ targets:
 
 Each archive contains `dshbox`, Node.js, `@deepseek-ai/dsh`, and packages listed in `dsh.plugins`. npm lifecycle scripts are disabled during packaging; preset plugins should therefore be published as built packages.
 
-`node.base_url` defaults to `https://nodejs.org/dist`; the example uses npmmirror for networks where nodejs.org is unavailable. The selected source must expose Node's normal `v<version>/SHASUMS256.txt` layout.
+`node.base_url` defaults to `https://nodejs.org/dist`; the example uses npmmirror for networks where nodejs.org is unavailable. The selected source must expose Node's normal `v<version>/SHASUMS256.txt` layout. Node downloads and npm package tarballs are reused from `cache`.
 
 ## macOS DMG and signing
 
-`macos.format: dmg` creates a compressed DMG containing `DeepSeek Harness.app` and an Applications shortcut. DMG creation requires macOS. Use `tar.gz` to keep the portable archive layout.
+`macos.format: dmg` creates an HFS+/LZMA DMG containing `DeepSeek Harness.app` and an Applications shortcut. HFS+ avoids APFS padding differences between macOS runners. DMG creation requires macOS. Use `tar.gz` to keep the portable archive layout.
 
 Unsigned builds need no identity:
 

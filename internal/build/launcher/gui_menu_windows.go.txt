@@ -1,0 +1,62 @@
+package main
+
+/*
+#cgo windows LDFLAGS: -luser32
+#include <windows.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define DSH_MENU_ABOUT 41001
+
+static HWND dsh_menu_window;
+static WNDPROC dsh_menu_previous_proc;
+static HMENU dsh_menu_handle;
+static wchar_t dsh_menu_version[128];
+
+static LRESULT CALLBACK dsh_menu_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+	if (message == WM_COMMAND && LOWORD(wparam) == DSH_MENU_ABOUT) {
+		wchar_t text[256];
+		_snwprintf_s(text, 256, _TRUNCATE, L"DeepSeek Harness\nVersion: %ls", dsh_menu_version);
+		MessageBoxW(hwnd, text, L"About DeepSeek Harness", MB_OK | MB_ICONINFORMATION);
+		return 0;
+	}
+	return CallWindowProcW(dsh_menu_previous_proc, hwnd, message, wparam, lparam);
+}
+
+static void dsh_menu_install(void *handle, const char *version) {
+	dsh_menu_window = (HWND)handle;
+	MultiByteToWideChar(CP_UTF8, 0, version, -1, dsh_menu_version, 128);
+	dsh_menu_handle = CreateMenu();
+	HMENU help = CreatePopupMenu();
+	AppendMenuW(help, MF_STRING, DSH_MENU_ABOUT, L"About");
+	AppendMenuW(dsh_menu_handle, MF_POPUP, (UINT_PTR)help, L"Help");
+	SetMenu(dsh_menu_window, dsh_menu_handle);
+	dsh_menu_previous_proc = (WNDPROC)SetWindowLongPtrW(dsh_menu_window, GWLP_WNDPROC, (LONG_PTR)dsh_menu_proc);
+}
+
+static void dsh_menu_uninstall(void *handle) {
+	HWND window = (HWND)handle;
+	if (window != dsh_menu_window) return;
+	if (dsh_menu_previous_proc != NULL) {
+		SetWindowLongPtrW(window, GWLP_WNDPROC, (LONG_PTR)dsh_menu_previous_proc);
+		dsh_menu_previous_proc = NULL;
+	}
+	SetMenu(window, NULL);
+	if (dsh_menu_handle != NULL) {
+		DestroyMenu(dsh_menu_handle);
+		dsh_menu_handle = NULL;
+	}
+	dsh_menu_window = NULL;
+}
+*/
+import "C"
+
+import "unsafe"
+
+func installNativeMenu(handle unsafe.Pointer, version string) {
+	value := C.CString(version)
+	defer C.free(unsafe.Pointer(value))
+	C.dsh_menu_install(handle, value)
+}
+
+func uninstallNativeMenu(handle unsafe.Pointer) { C.dsh_menu_uninstall(handle) }

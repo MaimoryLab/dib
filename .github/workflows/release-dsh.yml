@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '22.23.2'
+          node-version: '24.19.0'
 
       - name: Resolve official package
         id: version
@@ -75,11 +75,36 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '22.23.2'
+          node-version: '24.19.0'
+
+      - name: Restore build cache
+        uses: actions/cache@v5
+        with:
+          path: .cache
+          key: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
+          restore-keys: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
 
       - name: Build DMG
         shell: bash
         run: go run . -target "$TARGET" -dsh-version "$DSH_VERSION" -no-plugins
+
+      - name: Verify DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="dist/dsh-$DSH_VERSION-darwin-${{ matrix.arch }}.dmg"
+          mountpoint="$(mktemp -d)"
+          cleanup() {
+            hdiutil detach "$mountpoint" >/dev/null 2>&1 || true
+            rmdir "$mountpoint" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mountpoint"
+          test -d "$mountpoint/DeepSeek Harness.app"
+          test -L "$mountpoint/Applications"
+          test "$(readlink "$mountpoint/Applications")" = /Applications
+          ls -lh "$dmg"
+          hdiutil imageinfo "$dmg" | grep -E 'Format:|Total Bytes|Compressed Bytes|bytes-wasted'
 
       - name: Upload DMG
         uses: actions/upload-artifact@v7
@@ -114,7 +139,14 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '22.23.2'
+          node-version: '24.19.0'
+
+      - name: Restore build cache
+        uses: actions/cache@v5
+        with:
+          path: .cache
+          key: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
+          restore-keys: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
 
       - name: Install Windows ARM64 C toolchain
         if: matrix.arch == 'arm64'
@@ -193,7 +225,14 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '22.23.2'
+          node-version: '24.19.0'
+
+      - name: Restore build cache
+        uses: actions/cache@v5
+        with:
+          path: .cache
+          key: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
+          restore-keys: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
 
       - name: Install GTK4 and packaging tools
         shell: bash

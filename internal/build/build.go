@@ -127,7 +127,7 @@ func installNode(ctx context.Context, cfg config.Config, target config.Target, d
 func installDSH(ctx context.Context, cfg config.Config, target config.Target, dst string) error {
 	specs := []string{cfg.DSH.Package + "@" + cfg.DSH.Version}
 	specs = append(specs, cfg.DSH.Plugins...)
-	args := []string{"install", "--prefix", dst, "--omit=dev", "--package-lock=false", "--ignore-scripts", "--bin-links=false", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
+	args := []string{"install", "--prefix", dst, "--cache", filepath.Join(cfg.Cache, "npm"), "--prefer-offline", "--omit=dev", "--package-lock=false", "--ignore-scripts", "--bin-links=false", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
 	args = append(args, specs...)
 	cmd := exec.CommandContext(ctx, "npm", args...)
 	cmd.Stdout = os.Stdout
@@ -152,6 +152,9 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 			backend = "gui_linux.go.txt"
 		}
 		files = append(files, backend)
+		if target.OS == "windows" || target.OS == "darwin" {
+			files = append(files, "gui_menu_"+target.OS+".go.txt")
+		}
 	}
 	for _, name := range files {
 		data, err := launcherFiles.ReadFile("launcher/" + name)
@@ -176,7 +179,7 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 	if target.OS == "windows" {
 		output += ".exe"
 	}
-	ldflags := fmt.Sprintf("-s -w -X main.host=%s -X main.port=%d -X main.dshPackage=%s", cfg.Runtime.Host, cfg.Runtime.Port, cfg.DSH.Package)
+	ldflags := fmt.Sprintf("-s -w -X main.host=%s -X main.port=%d -X main.dshPackage=%s -X main.dshVersion=%s", cfg.Runtime.Host, cfg.Runtime.Port, cfg.DSH.Package, cfg.DSH.Version)
 	if target.OS == "windows" && mode == "gui" {
 		ldflags += " -H windowsgui"
 	}
@@ -218,7 +221,7 @@ func writeDMG(ctx context.Context, cfg config.Config, name, dmgRoot, appPath str
 		}
 	}
 	output := filepath.Join(cfg.Output, name+".dmg")
-	cmd := exec.CommandContext(ctx, "hdiutil", "create", "-volname", cfg.MacOS.VolumeName, "-srcfolder", dmgRoot, "-ov", "-format", "UDZO", output)
+	cmd := exec.CommandContext(ctx, "hdiutil", "create", "-volname", cfg.MacOS.VolumeName, "-srcfolder", dmgRoot, "-fs", "HFS+", "-nospotlight", "-ov", "-format", "ULMO", output)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

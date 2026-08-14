@@ -18,9 +18,13 @@ func newGUIWindow(url string) (*guiWindow, error) {
 	w.SetTitle("DeepSeek Harness")
 	w.SetSize(1280, 800, webview.HintNone)
 	w.Navigate(url)
+	installNativeMenu(w.Window(), dshVersion)
 	return &guiWindow{WebView: w}, nil
 }
 
 func (w *guiWindow) run()       { w.Run() }
 func (w *guiWindow) terminate() { w.Terminate() }
-func (w *guiWindow) destroy()   { w.Destroy() }
+func (w *guiWindow) destroy() {
+	uninstallNativeMenu(w.Window())
+	w.Destroy()
+}
