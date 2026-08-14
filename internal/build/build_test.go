@@ -3,6 +3,7 @@ package build
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,5 +213,144 @@ func TestLinuxOptionalDesktopBridges(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Linux GUI launcher does not contain %q", want)
 		}
+	}
+}
+
+func TestDesktopPluginPatchSelection(t *testing.T) {
+	for _, spec := range []string{"./plugins/dsh-desktop", "plugins/dsh-desktop/", desktopPluginName, desktopPluginName + "@0.2.0"} {
+		if !hasDesktopPlugin([]string{spec}) {
+			t.Fatalf("desktop plugin spec %q was not detected", spec)
+		}
+	}
+	if hasDesktopPlugin(nil) {
+		t.Fatal("-no-plugins selection still enables the desktop patch")
+	}
+	if hasDesktopPlugin([]string{"@example/other-plugin"}) {
+		t.Fatal("unrelated plugin enabled the desktop patch")
+	}
+}
+
+func TestDesktopPluginPatchAndClientRegistration(t *testing.T) {
+	patch, err := launcherFiles.ReadFile("launcher/dsh-desktop.patch.yml.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"id: dsh-desktop", "name: '@maimorylab/dsh-desktop'"} {
+		if !strings.Contains(string(patch), want) {
+			t.Fatalf("desktop patch does not contain %q", want)
+		}
+	}
+	clientPath := filepath.Join("..", "..", "plugins", "dsh-desktop", "lib", "client.js")
+	client, err := os.ReadFile(clientPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"window.__ModuleLoader__.load",
+		"id: '@maimorylab/dsh-desktop'",
+		"ctx.provide('desktop', desktop)",
+		"name: 'settings.plugins.tab'",
+		"id: 'dsh-desktop.about'",
+	} {
+		if !strings.Contains(string(client), want) {
+			t.Fatalf("desktop client bundle does not contain %q", want)
+		}
+	}
+}
+
+func TestDesktopVersionBridge(t *testing.T) {
+	mainSource, err := launcherFiles.ReadFile("launcher/main.go.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainSource), "func dshVersionScript()") {
+		t.Fatal("launcher does not expose the build version script")
+	}
+	for _, target := range []string{"webview", "linux"} {
+		source, err := launcherFiles.ReadFile("launcher/gui_" + target + ".go.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(source), "dshVersionScript()") {
+			t.Fatalf("%s GUI launcher does not inject the build version", target)
+		}
+	}
+	client, err := os.ReadFile(filepath.Join("..", "..", "plugins", "dsh-desktop", "lib", "client.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(client), "window.dshboxVersion") {
+		t.Fatal("desktop client does not consume the native build version")
+	}
+}
+
+func TestExposePluginDependencies(t *testing.T) {
+	work := t.TempDir()
+	dst := filepath.Join(work, "app")
+	dshDir := filepath.Join(dst, "node_modules", "@deepseek-ai", "dsh")
+	pluginDir := filepath.Join(work, "plugin")
+	if err := os.MkdirAll(dshDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dst, "node_modules", "@example", "plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dshDir, "package.json"), []byte(`{"name":"@deepseek-ai/dsh","dependencies":{"existing":"1.0.0"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "package.json"), []byte(`{"name":"@example/plugin","version":"2.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "node_modules", "@example", "plugin", "package.json"), []byte(`{"name":"@example/plugin","version":"2.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exposePluginDependencies(dst, "@deepseek-ai/dsh", []string{pluginDir}); err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	raw, err := os.ReadFile(filepath.Join(dshDir, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Dependencies["@example/plugin"]; got != "2.0.0" {
+		t.Fatalf("promoted plugin dependency = %q", got)
+	}
+}
+
+func TestAppCacheKeyIncludesInputsAndPluginContents(t *testing.T) {
+	plugin := filepath.Join(t.TempDir(), "plugin")
+	if err := os.Mkdir(plugin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	packageJSON := filepath.Join(plugin, "package.json")
+	if err := os.WriteFile(packageJSON, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := config.Target{OS: "darwin", Arch: "arm64"}
+	first, err := appCacheKey("24.19.0", target, []string{"@deepseek-ai/dsh@1.0.0", plugin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packageJSON, []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changedPlugin, err := appCacheKey("24.19.0", target, []string{"@deepseek-ai/dsh@1.0.0", plugin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedTarget, err := appCacheKey("24.19.0", config.Target{OS: "darwin", Arch: "amd64"}, []string{"@deepseek-ai/dsh@1.0.0", plugin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == changedPlugin || changedPlugin == changedTarget {
+		t.Fatal("cache key did not change with plugin contents or target")
 	}
 }

@@ -1,5 +1,8 @@
-import { createElement, useEffect, useState } from 'react'
-import { Service } from '@deepseek-ai/cordis'
+window.__ModuleLoader__.load({
+  id: '@maimorylab/dsh-desktop',
+  factory: require => {
+const { createElement, useEffect, useState } = require('react')
+const { Service } = require('@deepseek-ai/cordis')
 
 const NS = 'dshDesktop'
 
@@ -125,14 +128,16 @@ class DesktopRuntime extends Service {
   }
 }
 
-export const inject = ['connection', 'locale', 'slots']
+const inject = ['connection', 'locale', 'slots']
 
-export function apply(ctx) {
+function apply(ctx) {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-desktop: dictionaries')
   const t = ctx.locale.bind(NS)
   const desktop = new DesktopRuntime(ctx)
+  ctx.effect(() => ctx.provide('desktop', desktop), 'dsh-desktop: service')
   ctx.effect(() => () => desktop.dispose(), 'dsh-desktop: capability bridge')
   const describe = async () => {
+    if (typeof window.dshboxVersion === 'string' && window.dshboxVersion) return window.dshboxVersion
     const response = await ctx.connection.api.host.describe({})
     if (!response.result.ok) throw new Error(`${response.result.error.code}: ${response.result.error.message}`)
     return response.result.value.version
@@ -171,3 +176,7 @@ export function apply(ctx) {
     }), 'dsh-desktop: about menu')
   }
 }
+
+    return { inject, apply }
+  },
+})

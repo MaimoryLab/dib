@@ -9,10 +9,12 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -27,6 +29,10 @@ import (
 
 //go:embed launcher/*.txt
 var launcherFiles embed.FS
+
+const desktopPluginName = "@maimorylab/dsh-desktop"
+
+const appCacheVersion = "2"
 
 func Run(ctx context.Context, cfg config.Config) error {
 	for _, target := range cfg.Targets {
@@ -65,6 +71,11 @@ func buildTarget(ctx context.Context, cfg config.Config, target config.Target) e
 	}
 	if err := installDSH(ctx, cfg, target, filepath.Join(payloadRoot, "runtime", "app")); err != nil {
 		return err
+	}
+	if cfg.ModeFor(target) == "gui" && hasDesktopPlugin(cfg.DSH.Plugins) {
+		if err := writeDesktopPluginPatch(filepath.Join(payloadRoot, "runtime", "app")); err != nil {
+			return err
+		}
 	}
 	if err := buildLauncher(ctx, cfg, target, launcherRoot); err != nil {
 		return err
@@ -126,7 +137,32 @@ func installNode(ctx context.Context, cfg config.Config, target config.Target, d
 
 func installDSH(ctx context.Context, cfg config.Config, target config.Target, dst string) error {
 	specs := []string{cfg.DSH.Package + "@" + cfg.DSH.Version}
-	specs = append(specs, cfg.DSH.Plugins...)
+	plugins, packDirs, err := packLocalPluginSpecs(ctx, cfg.DSH.Plugins)
+	if err != nil {
+		for _, dir := range packDirs {
+			_ = os.RemoveAll(dir)
+		}
+		return err
+	}
+	defer func() {
+		for _, dir := range packDirs {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	specs = append(specs, plugins...)
+	cacheSpecs := append([]string{cfg.DSH.Package + "@" + cfg.DSH.Version}, cfg.DSH.Plugins...)
+	cacheKey, err := appCacheKey(cfg.Node.Version, target, cacheSpecs)
+	if err != nil {
+		return err
+	}
+	cacheDir := filepath.Join(cfg.Cache, "app", cacheKey)
+	if _, err := os.Stat(filepath.Join(cacheDir, ".ready")); err == nil {
+		fmt.Println("using cached DSH runtime")
+		if err := os.CopyFS(dst, os.DirFS(filepath.Join(cacheDir, "root"))); err != nil {
+			return err
+		}
+		return exposePluginDependencies(dst, cfg.DSH.Package, cfg.DSH.Plugins)
+	}
 	args := []string{"install", "--prefix", dst, "--cache", filepath.Join(cfg.Cache, "npm"), "--prefer-offline", "--omit=dev", "--package-lock=false", "--ignore-scripts", "--bin-links=false", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
 	args = append(args, specs...)
 	cmd := exec.CommandContext(ctx, "npm", args...)
@@ -135,7 +171,268 @@ func installDSH(ctx context.Context, cfg config.Config, target config.Target, ds
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("npm install: %w", err)
 	}
+	if err := exposePluginDependencies(dst, cfg.DSH.Package, cfg.DSH.Plugins); err != nil {
+		return err
+	}
+	return storeAppCache(cacheDir, dst)
+}
+
+func appCacheKey(nodeVersion string, target config.Target, specs []string) (string, error) {
+	hash := sha256.New()
+	for _, value := range append([]string{appCacheVersion, nodeVersion, target.OS, target.Arch}, specs...) {
+		if dir, ok := localPluginDir(value); ok {
+			var err error
+			value, err = directorySHA256(dir)
+			if err != nil {
+				return "", err
+			}
+		} else if info, err := os.Stat(value); err == nil && info.Mode().IsRegular() {
+			value, err = fileSHA256(value)
+			if err != nil {
+				return "", err
+			}
+		}
+		fmt.Fprintf(hash, "%d:%s", len(value), value)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func directorySHA256(root string) (string, error) {
+	hash := sha256.New()
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == "node_modules" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		value := ""
+		if entry.Type().IsRegular() {
+			value, err = fileSHA256(path)
+		} else if entry.Type()&os.ModeSymlink != 0 {
+			value, err = os.Readlink(path)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(hash, "%d:%s%d:%s", len(rel), filepath.ToSlash(rel), len(value), value)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func storeAppCache(cacheDir, source string) error {
+	parent := filepath.Dir(cacheDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(cacheDir); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(parent, filepath.Base(cacheDir)+"-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	if err := os.CopyFS(filepath.Join(tmp, "root"), os.DirFS(source)); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".ready"), nil, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, cacheDir)
+}
+
+func packLocalPluginSpecs(ctx context.Context, specs []string) ([]string, []string, error) {
+	result := append([]string(nil), specs...)
+	var packDirs []string
+	for index, spec := range specs {
+		dir, ok := localPluginDir(spec)
+		if !ok {
+			continue
+		}
+		packDir, err := os.MkdirTemp("", "dib-plugin-pack-")
+		if err != nil {
+			return nil, packDirs, err
+		}
+		packDirs = append(packDirs, packDir)
+		cmd := exec.CommandContext(ctx, "npm", "pack", "--ignore-scripts", "--pack-destination", packDir)
+		cmd.Dir = dir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return nil, packDirs, fmt.Errorf("npm pack %s: %w", spec, err)
+		}
+		entries, err := os.ReadDir(packDir)
+		if err != nil {
+			return nil, packDirs, err
+		}
+		var archive string
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".tgz") {
+				if archive != "" {
+					return nil, packDirs, fmt.Errorf("npm pack %s produced multiple archives", spec)
+				}
+				archive = entry.Name()
+			}
+		}
+		if archive == "" {
+			return nil, packDirs, fmt.Errorf("npm pack %s produced no archive", spec)
+		}
+		result[index] = filepath.Join(packDir, archive)
+	}
+	return result, packDirs, nil
+}
+
+func localPluginDir(spec string) (string, bool) {
+	value := strings.TrimSpace(spec)
+	if after, ok := strings.CutPrefix(value, "file:"); ok {
+		value = after
+	} else if !strings.HasPrefix(value, ".") && !filepath.IsAbs(value) {
+		return "", false
+	}
+	if value == "" {
+		return "", false
+	}
+	dir, err := filepath.Abs(value)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(dir)
+	return dir, err == nil && info.IsDir()
+}
+
+func exposePluginDependencies(dst, packageName string, specs []string) error {
+	anchor := filepath.Join(dst, "node_modules", filepath.FromSlash(packageName), "package.json")
+	raw, err := os.ReadFile(anchor)
+	if err != nil {
+		return fmt.Errorf("read DSH package manifest: %w", err)
+	}
+	var manifest map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("parse DSH package manifest: %w", err)
+	}
+	dependencies := make(map[string]string)
+	if rawDeps, ok := manifest["dependencies"]; ok {
+		if err := json.Unmarshal(rawDeps, &dependencies); err != nil {
+			return fmt.Errorf("parse DSH dependencies: %w", err)
+		}
+	}
+	changed := false
+	for _, spec := range specs {
+		name, ok := pluginPackageName(spec)
+		if !ok {
+			continue
+		}
+		pluginManifestPath := filepath.Join(dst, "node_modules", filepath.FromSlash(name), "package.json")
+		pluginRaw, err := os.ReadFile(pluginManifestPath)
+		if err != nil {
+			return fmt.Errorf("read installed plugin %s: %w", name, err)
+		}
+		var pluginManifest struct {
+			Version string `json:"version"`
+		}
+		if err := json.Unmarshal(pluginRaw, &pluginManifest); err != nil {
+			return fmt.Errorf("parse installed plugin %s: %w", name, err)
+		}
+		if pluginManifest.Version == "" {
+			return fmt.Errorf("installed plugin %s has no version", name)
+		}
+		if dependencies[name] == pluginManifest.Version {
+			continue
+		}
+		dependencies[name] = pluginManifest.Version
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	encoded, err := json.Marshal(dependencies)
+	if err != nil {
+		return err
+	}
+	manifest["dependencies"] = encoded
+	encoded, err = json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
+	if err := os.WriteFile(anchor, encoded, 0o644); err != nil {
+		return fmt.Errorf("update DSH package manifest: %w", err)
+	}
 	return nil
+}
+
+func pluginPackageName(spec string) (string, bool) {
+	if dir, ok := localPluginDir(spec); ok {
+		raw, err := os.ReadFile(filepath.Join(dir, "package.json"))
+		if err != nil {
+			return "", false
+		}
+		var manifest struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(raw, &manifest); err != nil || manifest.Name == "" {
+			return "", false
+		}
+		return manifest.Name, true
+	}
+	name := strings.TrimSpace(spec)
+	if strings.HasPrefix(name, "@") {
+		slash := strings.IndexByte(name, '/')
+		if slash < 2 {
+			return "", false
+		}
+		suffix := name[slash+1:]
+		if at := strings.IndexByte(suffix, '@'); at >= 0 {
+			suffix = suffix[:at]
+		}
+		if suffix == "" || strings.ContainsAny(suffix, "/:") {
+			return "", false
+		}
+		return name[:slash+1] + suffix, true
+	}
+	if at := strings.IndexByte(name, '@'); at >= 0 {
+		name = name[:at]
+	}
+	if name == "" || strings.ContainsAny(name, "/:") {
+		return "", false
+	}
+	return name, true
+}
+
+func hasDesktopPlugin(specs []string) bool {
+	for _, spec := range specs {
+		if name, ok := pluginPackageName(spec); ok && name == desktopPluginName {
+			return true
+		}
+		clean := strings.TrimSuffix(filepath.ToSlash(strings.TrimSpace(spec)), "/")
+		if clean == desktopPluginName || clean == "plugins/dsh-desktop" || strings.HasSuffix(clean, "/plugins/dsh-desktop") {
+			return true
+		}
+	}
+	return false
+}
+
+func writeDesktopPluginPatch(dst string) error {
+	data, err := launcherFiles.ReadFile("launcher/dsh-desktop.patch.yml.txt")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dst, "dsh-desktop.patch.yml"), data, 0o644)
 }
 
 func buildLauncher(ctx context.Context, cfg config.Config, target config.Target, outputDir string) error {

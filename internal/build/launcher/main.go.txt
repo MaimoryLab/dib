@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 )
 
 var (
@@ -14,6 +15,10 @@ var (
 	dshPackage = "@deepseek-ai/dsh"
 	dshVersion = "unknown"
 )
+
+func dshVersionScript() string {
+	return "window.dshboxVersion=" + strconv.Quote(dshVersion) + ";"
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -37,7 +42,12 @@ func serverCommand() (*exec.Cmd, string, error) {
 	}
 	entry := filepath.Join(root, "runtime", "app", "node_modules", filepath.FromSlash(dshPackage), "lib", "bin.js")
 	url := "http://" + host + ":" + port
-	args := []string{entry, "web", "--host", host, "--port", port}
+	args := []string{entry, "web"}
+	desktopPatch := filepath.Join(root, "runtime", "app", "dsh-desktop.patch.yml")
+	if _, err := os.Stat(desktopPatch); err == nil {
+		args = append(args, "--patch", desktopPatch)
+	}
+	args = append(args, "--host", host, "--port", port)
 	args = append(args, os.Args[1:]...)
 	cmd := exec.Command(node, args...)
 	cmd.Stdin = os.Stdin
