@@ -36,7 +36,7 @@ var launcherFiles embed.FS
 
 const desktopPluginName = "@maimorylab/dsh-desktop"
 
-const appCacheVersion = "3"
+const appCacheVersion = "4"
 
 func Run(ctx context.Context, cfg config.Config) error {
 	for _, target := range cfg.Targets {
@@ -167,6 +167,12 @@ func installDSH(ctx context.Context, cfg config.Config, target config.Target, ds
 			_ = os.RemoveAll(dir)
 		}
 	}()
+	for _, spec := range cfg.DSH.Plugins {
+		if name, _ := pluginPackageName(spec); name == desktopPluginName {
+			specs = append(specs, "@deepseek-ai/dsh-tools@"+cfg.DSH.Version)
+			break
+		}
+	}
 	specs = append(specs, plugins...)
 	cacheSpecs := append([]string{cfg.DSH.Package + "@" + cfg.DSH.Version}, cfg.DSH.Plugins...)
 	cacheKey, err := appCacheKey(cfg.Node.Version, target, cacheSpecs)
@@ -181,7 +187,7 @@ func installDSH(ctx context.Context, cfg config.Config, target config.Target, ds
 		}
 		return exposePluginDependencies(dst, cfg.DSH.Package, cfg.DSH.Plugins)
 	}
-	args := []string{"add", "--dir", dst, "--store-dir", filepath.Join(cfg.Cache, "pnpm"), "--prefer-offline", "--prod", "--ignore-scripts", "--lockfile=false", "--config.node-linker=hoisted", "--config.package-import-method=copy", "--config.auto-install-peers=false", "--config.minimum-release-age=0", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
+	args := []string{"add", "--dir", dst, "--store-dir", filepath.Join(cfg.Cache, "pnpm"), "--prefer-offline", "--prod", "--ignore-scripts", "--lockfile=false", "--config.node-linker=hoisted", "--config.package-import-method=copy", "--config.minimum-release-age=0", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
 	args = append(args, specs...)
 	cmd := exec.CommandContext(ctx, "pnpm", args...)
 	cmd.Stdout = os.Stdout
