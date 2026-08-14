@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/MaimoryLab/dib/internal/config"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestExtractZipRejectsPathTraversal(t *testing.T) {
@@ -34,6 +35,34 @@ func TestExtractZipRejectsPathTraversal(t *testing.T) {
 	}
 	if err := extractZip(archivePath, t.TempDir(), true); err == nil {
 		t.Fatal("extractZip accepted a path outside the destination")
+	}
+}
+
+func TestStoreAppCacheDoesNotReplaceExistingEntry(t *testing.T) {
+	work := t.TempDir()
+	source := filepath.Join(work, "source")
+	cache := filepath.Join(work, "app", "key")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "value"), []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := storeAppCache(cache, source); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "value"), []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := storeAppCache(cache, source); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(cache, "root", "value"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "first" {
+		t.Fatalf("cache entry was replaced: %q", got)
 	}
 }
 
@@ -216,29 +245,27 @@ func TestLinuxOptionalDesktopBridges(t *testing.T) {
 	}
 }
 
-func TestDesktopPluginPatchSelection(t *testing.T) {
-	for _, spec := range []string{"./plugins/dsh-desktop", "plugins/dsh-desktop/", desktopPluginName, desktopPluginName + "@0.2.0"} {
-		if !hasDesktopPlugin([]string{spec}) {
-			t.Fatalf("desktop plugin spec %q was not detected", spec)
-		}
-	}
-	if hasDesktopPlugin(nil) {
-		t.Fatal("-no-plugins selection still enables the desktop patch")
-	}
-	if hasDesktopPlugin([]string{"@example/other-plugin"}) {
-		t.Fatal("unrelated plugin enabled the desktop patch")
-	}
-}
-
 func TestDesktopPluginPatchAndClientRegistration(t *testing.T) {
-	patch, err := launcherFiles.ReadFile("launcher/dsh-desktop.patch.yml.txt")
+	patchPath := filepath.Join(t.TempDir(), "dsh-desktop.patch.yml")
+	if err := writePluginPatch(filepath.Dir(patchPath), []string{desktopPluginName + "@0.2.0", "@example/other-plugin@1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := os.ReadFile(patchPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"id: dsh-desktop", "name: '@maimorylab/dsh-desktop'"} {
-		if !strings.Contains(string(patch), want) {
-			t.Fatalf("desktop patch does not contain %q", want)
-		}
+	var parsed []pluginPatch
+	if err := yaml.Unmarshal(patch, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed) != 1 || len(parsed[0].Insert) != 2 {
+		t.Fatalf("unexpected plugin patch: %+v", parsed)
+	}
+	if parsed[0].Insert[0] != (pluginPatchEntry{ID: "dsh-desktop", Name: desktopPluginName}) {
+		t.Fatalf("desktop patch entry = %+v", parsed[0].Insert[0])
+	}
+	if parsed[0].Insert[1] != (pluginPatchEntry{ID: "@example/other-plugin", Name: "@example/other-plugin"}) {
+		t.Fatalf("other plugin patch entry = %+v", parsed[0].Insert[1])
 	}
 	clientPath := filepath.Join("..", "..", "plugins", "dsh-desktop", "lib", "client.js")
 	client, err := os.ReadFile(clientPath)
@@ -248,13 +275,41 @@ func TestDesktopPluginPatchAndClientRegistration(t *testing.T) {
 	for _, want := range []string{
 		"window.__ModuleLoader__.load",
 		"id: '@maimorylab/dsh-desktop'",
-		"ctx.provide('desktop', desktop)",
+		"super(ctx, 'desktop')",
+		"ctx.effect(() => () => desktop.dispose()",
 		"name: 'settings.plugins.tab'",
 		"id: 'dsh-desktop.about'",
 	} {
 		if !strings.Contains(string(client), want) {
 			t.Fatalf("desktop client bundle does not contain %q", want)
 		}
+	}
+	if strings.Contains(string(client), "ctx.provide('desktop', desktop)") {
+		t.Fatal("desktop client registers its Service twice")
+	}
+}
+
+func TestPluginPatchResolvesLocalPackagesAndRejectsUnknownSpecs(t *testing.T) {
+	emptyDir := t.TempDir()
+	if err := writePluginPatch(emptyDir, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(emptyDir, "dsh-desktop.patch.yml")); !os.IsNotExist(err) {
+		t.Fatalf("empty plugin list created a patch: %v", err)
+	}
+
+	pluginDir := filepath.Join(t.TempDir(), "plugin")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "package.json"), []byte(`{"name":"@example/local-plugin"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePluginPatch(t.TempDir(), []string{pluginDir, "npm:@example/remote-plugin@1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePluginPatch(t.TempDir(), []string{"https://example.com/plugin.tgz"}); err == nil {
+		t.Fatal("unknown plugin spec was accepted")
 	}
 }
 

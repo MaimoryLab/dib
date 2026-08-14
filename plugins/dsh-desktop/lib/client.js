@@ -6,8 +6,8 @@ const { Service } = require('@deepseek-ai/cordis')
 
 const NS = 'dshDesktop'
 
-const zh = { tab: '关于', title: '关于 DeepSeek Harness', version: '版本', loading: '正在读取版本…', unavailable: '版本信息暂不可用。' }
-const en = { tab: 'About', title: 'About DeepSeek Harness', version: 'Version', loading: 'Reading version…', unavailable: 'Version information is unavailable.' }
+const zh = { tab: '关于', title: '关于 DeepSeek Harness', subtitle: '桌面客户端', version: '版本', loading: '正在读取版本…', unavailable: '版本信息暂不可用。', close: '关闭' }
+const en = { tab: 'About', title: 'About DeepSeek Harness', subtitle: 'Desktop client', version: 'Version', loading: 'Reading version…', unavailable: 'Version information is unavailable.', close: 'Close' }
 
 function AboutPage({ describe, t }) {
   const [state, setState] = useState({ status: 'loading' })
@@ -134,7 +134,6 @@ function apply(ctx) {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-desktop: dictionaries')
   const t = ctx.locale.bind(NS)
   const desktop = new DesktopRuntime(ctx)
-  ctx.effect(() => ctx.provide('desktop', desktop), 'dsh-desktop: service')
   ctx.effect(() => () => desktop.dispose(), 'dsh-desktop: capability bridge')
   const describe = async () => {
     if (typeof window.dshboxVersion === 'string' && window.dshboxVersion) return window.dshboxVersion
@@ -147,13 +146,29 @@ function apply(ctx) {
     if (existing) return
     const dialog = document.createElement('dialog')
     dialog.id = 'dsh-desktop-about-dialog'
-    dialog.innerHTML = `<form method="dialog"><h2>${t('title')}</h2><p>${t('loading')}</p><button>${t('tab')}</button></form>`
+    dialog.setAttribute('aria-labelledby', 'dsh-desktop-dialog-title')
+    dialog.innerHTML = `<style>
+      #dsh-desktop-about-dialog{color-scheme:light dark;width:min(360px,calc(100vw - 32px));padding:0;border:1px solid #3f4145;border-radius:8px;color:#f4f4f5;background:#202124;box-shadow:0 18px 48px #0009}
+      #dsh-desktop-about-dialog::backdrop{background:#0008;backdrop-filter:blur(2px)}
+      #dsh-desktop-about-dialog form{padding:24px}
+      #dsh-desktop-about-dialog header{display:flex;align-items:flex-start;gap:14px}
+      #dsh-desktop-about-dialog .mark{display:grid;flex:0 0 40px;height:40px;place-items:center;border-radius:8px;color:#fff;background:#087cfa;font-weight:700;font-size:15px}
+      #dsh-desktop-about-dialog h2{margin:1px 40px 3px 0;font-size:19px;line-height:1.35;letter-spacing:0}
+      #dsh-desktop-about-dialog .product{margin:0;color:#a7a9ad;font-size:13px}
+      #dsh-desktop-about-dialog .close{position:absolute;top:14px;right:14px;display:grid;width:32px;height:32px;padding:0;place-items:center;border:0;border-radius:6px;color:#a7a9ad;background:transparent;font:22px/1 system-ui;cursor:pointer}
+      #dsh-desktop-about-dialog .close:hover{color:#fff;background:#ffffff12}
+      #dsh-desktop-about-dialog .close:focus-visible{outline:2px solid #409cff;outline-offset:2px}
+      #dsh-desktop-about-dialog .version{display:flex;align-items:center;justify-content:space-between;margin:22px 0 0;padding:12px 14px;border-radius:6px;color:#a7a9ad;background:#ffffff0a;font-size:13px}
+      #dsh-desktop-about-dialog .version strong{color:#f4f4f5;font-weight:600;font-variant-numeric:tabular-nums}
+      @media(prefers-color-scheme:light){#dsh-desktop-about-dialog{border-color:#d8d9dc;color:#202124;background:#fff;box-shadow:0 18px 48px #0003}#dsh-desktop-about-dialog::backdrop{background:#0005}#dsh-desktop-about-dialog .product,#dsh-desktop-about-dialog .close,#dsh-desktop-about-dialog .version{color:#686b70}#dsh-desktop-about-dialog .close:hover{color:#202124;background:#0000000a}#dsh-desktop-about-dialog .version{background:#f5f6f7}#dsh-desktop-about-dialog .version strong{color:#202124}}
+    </style><form method="dialog"><header><span class="mark" aria-hidden="true">DS</span><div><h2 id="dsh-desktop-dialog-title">DeepSeek Harness</h2><p class="product">${t('subtitle')}</p></div><button class="close" aria-label="${t('close')}" title="${t('close')}">×</button></header><p class="version"><span>${t('version')}</span><strong>${t('loading')}</strong></p></form>`
     document.body.append(dialog)
     dialog.showModal()
     void describe().then(
-      version => { const p = dialog.querySelector('p'); if (p) p.textContent = `${t('version')}: ${version}` },
-      () => { const p = dialog.querySelector('p'); if (p) p.textContent = t('unavailable') },
+      version => { const value = dialog.querySelector('.version strong'); if (value) value.textContent = version },
+      () => { const value = dialog.querySelector('.version strong'); if (value) value.textContent = t('unavailable') },
     )
+    dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close() })
     dialog.addEventListener('close', () => dialog.remove(), { once: true })
   }
   window.addEventListener('dshbox:open-about', showAbout)

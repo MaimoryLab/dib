@@ -1,5 +1,0 @@
-# The desktop client is installed as an npm package, but DSH only loads
-# packages that are present in the profile's Loader tree.
-- insert:
-    - id: dsh-desktop
-      name: '@maimorylab/dsh-desktop'

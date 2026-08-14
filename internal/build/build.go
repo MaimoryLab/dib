@@ -72,8 +72,9 @@ func buildTarget(ctx context.Context, cfg config.Config, target config.Target) e
 	if err := installDSH(ctx, cfg, target, filepath.Join(payloadRoot, "runtime", "app")); err != nil {
 		return err
 	}
-	if cfg.ModeFor(target) == "gui" && hasDesktopPlugin(cfg.DSH.Plugins) {
-		if err := writeDesktopPluginPatch(filepath.Join(payloadRoot, "runtime", "app")); err != nil {
+	// npm installation alone does not add packages to DSH's Loader tree.
+	if len(cfg.DSH.Plugins) > 0 {
+		if err := writePluginPatch(filepath.Join(payloadRoot, "runtime", "app"), cfg.DSH.Plugins); err != nil {
 			return err
 		}
 	}
@@ -239,9 +240,6 @@ func storeAppCache(cacheDir, source string) error {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(cacheDir); err != nil {
-		return err
-	}
 	tmp, err := os.MkdirTemp(parent, filepath.Base(cacheDir)+"-")
 	if err != nil {
 		return err
@@ -253,7 +251,13 @@ func storeAppCache(cacheDir, source string) error {
 	if err := os.WriteFile(filepath.Join(tmp, ".ready"), nil, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, cacheDir)
+	if err := os.Rename(tmp, cacheDir); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func packLocalPluginSpecs(ctx context.Context, specs []string) ([]string, []string, error) {
@@ -301,7 +305,7 @@ func localPluginDir(spec string) (string, bool) {
 	value := strings.TrimSpace(spec)
 	if after, ok := strings.CutPrefix(value, "file:"); ok {
 		value = after
-	} else if !strings.HasPrefix(value, ".") && !filepath.IsAbs(value) {
+	} else if !strings.HasPrefix(value, ".") && !filepath.IsAbs(value) && !strings.ContainsAny(value, `/\\`) {
 		return "", false
 	}
 	if value == "" {
@@ -391,6 +395,7 @@ func pluginPackageName(spec string) (string, bool) {
 		return manifest.Name, true
 	}
 	name := strings.TrimSpace(spec)
+	name = strings.TrimPrefix(name, "npm:")
 	if strings.HasPrefix(name, "@") {
 		slash := strings.IndexByte(name, '/')
 		if slash < 2 {
@@ -414,23 +419,39 @@ func pluginPackageName(spec string) (string, bool) {
 	return name, true
 }
 
-func hasDesktopPlugin(specs []string) bool {
-	for _, spec := range specs {
-		if name, ok := pluginPackageName(spec); ok && name == desktopPluginName {
-			return true
-		}
-		clean := strings.TrimSuffix(filepath.ToSlash(strings.TrimSpace(spec)), "/")
-		if clean == desktopPluginName || clean == "plugins/dsh-desktop" || strings.HasSuffix(clean, "/plugins/dsh-desktop") {
-			return true
-		}
-	}
-	return false
+type pluginPatch struct {
+	Insert []pluginPatchEntry `yaml:"insert"`
 }
 
-func writeDesktopPluginPatch(dst string) error {
-	data, err := launcherFiles.ReadFile("launcher/dsh-desktop.patch.yml.txt")
+type pluginPatchEntry struct {
+	ID   string `yaml:"id"`
+	Name string `yaml:"name"`
+}
+
+func writePluginPatch(dst string, specs []string) error {
+	entries := make([]pluginPatchEntry, 0, len(specs))
+	seen := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		name, ok := pluginPackageName(spec)
+		if !ok {
+			return fmt.Errorf("resolve plugin %q for Cordis patch: expected an npm package spec or local package directory", spec)
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		id := name
+		if name == desktopPluginName {
+			id = "dsh-desktop"
+		}
+		entries = append(entries, pluginPatchEntry{ID: id, Name: name})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	data, err := yaml.Marshal([]pluginPatch{{Insert: entries}})
 	if err != nil {
-		return err
+		return fmt.Errorf("encode Cordis plugin patch: %w", err)
 	}
 	return os.WriteFile(filepath.Join(dst, "dsh-desktop.patch.yml"), data, 0o644)
 }

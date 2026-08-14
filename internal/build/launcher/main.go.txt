@@ -43,9 +43,9 @@ func serverCommand() (*exec.Cmd, string, error) {
 	entry := filepath.Join(root, "runtime", "app", "node_modules", filepath.FromSlash(dshPackage), "lib", "bin.js")
 	url := "http://" + host + ":" + port
 	args := []string{entry, "web"}
-	desktopPatch := filepath.Join(root, "runtime", "app", "dsh-desktop.patch.yml")
-	if _, err := os.Stat(desktopPatch); err == nil {
-		args = append(args, "--patch", desktopPatch)
+	pluginPatch := filepath.Join(root, "runtime", "app", "dsh-desktop.patch.yml")
+	if _, err := os.Stat(pluginPatch); err == nil {
+		args = append(args, "--patch", pluginPatch)
 	}
 	args = append(args, "--host", host, "--port", port)
 	args = append(args, os.Args[1:]...)
