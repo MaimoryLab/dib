@@ -6,7 +6,7 @@ DSH-in-Box packages DeepSeek Harness with a private Node.js runtime and a small 
 
 ## Build
 
-Requirements: Go, npm, and network access. GUI launchers also require a C/C++ toolchain for the target. Linux requires the GTK 4 and WebKitGTK 6.0 development packages while building, and their runtime libraries on the destination machine.
+Requirements: Go, pnpm 11.21.0, and network access. GUI launchers also require a C/C++ toolchain for the target. Linux requires the GTK 4 and WebKitGTK 6.0 development packages while building, and their runtime libraries on the destination machine.
 
 ```sh
 go run . -dry-run
@@ -24,7 +24,7 @@ targets:
     cxx: aarch64-w64-mingw32-g++
 ```
 
-Each archive contains `dshbox`, Node.js, `@deepseek-ai/dsh`, and packages listed in `dsh.plugins`. npm lifecycle scripts are disabled during packaging; preset plugins should therefore be published as built packages.
+Each archive contains `dshbox`, Node.js, `@deepseek-ai/dsh`, and packages listed in `dsh.plugins`. pnpm lifecycle scripts are disabled during packaging; preset plugins should therefore be published as built packages.
 
 Set `icon` to a 512x512 PNG. dib converts it into the Windows executable/installer/shortcut icon, the macOS app and DMG volume icon, and the Linux desktop/taskbar icon.
 
@@ -32,7 +32,7 @@ Set `icon` to a 512x512 PNG. dib converts it into the Windows executable/install
 icon: icon.png
 ```
 
-`node.base_url` defaults to `https://nodejs.org/dist`; the example uses npmmirror for networks where nodejs.org is unavailable. The selected source must expose Node's normal `v<version>/SHASUMS256.txt` layout. Node downloads, npm package tarballs, and installed DSH runtimes are reused from `cache`.
+`node.base_url` defaults to `https://nodejs.org/dist`; the example uses npmmirror for networks where nodejs.org is unavailable. The selected source must expose Node's normal `v<version>/SHASUMS256.txt` layout. Node downloads, the pnpm store, and installed DSH runtimes are reused from `cache`.
 
 ## macOS DMG and signing
 

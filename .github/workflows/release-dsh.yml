@@ -28,6 +28,10 @@ jobs:
         with:
           node-version: '24.19.0'
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '11.21.0'
+
       - name: Resolve official package
         id: version
         shell: bash
@@ -35,7 +39,7 @@ jobs:
           REQUESTED_VERSION: ${{ inputs.dsh_version }}
         run: |
           set -euo pipefail
-          resolved="$(npm view "@deepseek-ai/dsh@$REQUESTED_VERSION" version)"
+          resolved="$(pnpm view "@deepseek-ai/dsh@$REQUESTED_VERSION" version)"
           if [[ "$resolved" != "$REQUESTED_VERSION" ]]; then
             echo "dsh_version must be an exact published version; resolved '$resolved'" >&2
             exit 1
@@ -77,12 +81,16 @@ jobs:
         with:
           node-version: '24.19.0'
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '11.21.0'
+
       - name: Restore build cache
         uses: actions/cache@v5
         with:
           path: .cache
-          key: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
-          restore-keys: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
+          key: dib-v2-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
+          restore-keys: dib-v2-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
 
       - name: Build DMG
         shell: bash
@@ -141,12 +149,16 @@ jobs:
         with:
           node-version: '24.19.0'
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '11.21.0'
+
       - name: Restore build cache
         uses: actions/cache@v5
         with:
           path: .cache
-          key: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
-          restore-keys: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
+          key: dib-v2-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
+          restore-keys: dib-v2-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
 
       - name: Install Windows ARM64 C toolchain
         if: matrix.arch == 'arm64'
@@ -227,12 +239,16 @@ jobs:
         with:
           node-version: '24.19.0'
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '11.21.0'
+
       - name: Restore build cache
         uses: actions/cache@v5
         with:
           path: .cache
-          key: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
-          restore-keys: dib-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
+          key: dib-v2-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-dsh-${{ needs.prepare.outputs.version }}
+          restore-keys: dib-v2-${{ runner.os }}-${{ matrix.arch }}-node-24.19.0-
 
       - name: Install GTK4 and packaging tools
         shell: bash

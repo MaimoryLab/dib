@@ -36,7 +36,7 @@ var launcherFiles embed.FS
 
 const desktopPluginName = "@maimorylab/dsh-desktop"
 
-const appCacheVersion = "2"
+const appCacheVersion = "3"
 
 func Run(ctx context.Context, cfg config.Config) error {
 	for _, target := range cfg.Targets {
@@ -76,7 +76,7 @@ func buildTarget(ctx context.Context, cfg config.Config, target config.Target) e
 	if err := installDSH(ctx, cfg, target, filepath.Join(payloadRoot, "runtime", "app")); err != nil {
 		return err
 	}
-	// npm installation alone does not add packages to DSH's Loader tree.
+	// Package installation alone does not add packages to DSH's Loader tree.
 	if len(cfg.DSH.Plugins) > 0 {
 		if err := writePluginPatch(filepath.Join(payloadRoot, "runtime", "app"), cfg.DSH.Plugins); err != nil {
 			return err
@@ -168,13 +168,16 @@ func installDSH(ctx context.Context, cfg config.Config, target config.Target, ds
 		}
 		return exposePluginDependencies(dst, cfg.DSH.Package, cfg.DSH.Plugins)
 	}
-	args := []string{"install", "--prefix", dst, "--cache", filepath.Join(cfg.Cache, "npm"), "--prefer-offline", "--omit=dev", "--package-lock=false", "--ignore-scripts", "--bin-links=false", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
+	args := []string{"add", "--dir", dst, "--store-dir", filepath.Join(cfg.Cache, "pnpm"), "--prefer-offline", "--prod", "--ignore-scripts", "--lockfile=false", "--config.node-linker=hoisted", "--config.package-import-method=copy", "--config.auto-install-peers=false", "--config.minimum-release-age=0", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
 	args = append(args, specs...)
-	cmd := exec.CommandContext(ctx, "npm", args...)
+	cmd := exec.CommandContext(ctx, "pnpm", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("npm install: %w", err)
+		return fmt.Errorf("pnpm add: %w", err)
+	}
+	if err := os.RemoveAll(filepath.Join(dst, "node_modules", ".bin")); err != nil {
+		return err
 	}
 	if err := exposePluginDependencies(dst, cfg.DSH.Package, cfg.DSH.Plugins); err != nil {
 		return err
@@ -277,12 +280,12 @@ func packLocalPluginSpecs(ctx context.Context, specs []string) ([]string, []stri
 			return nil, packDirs, err
 		}
 		packDirs = append(packDirs, packDir)
-		cmd := exec.CommandContext(ctx, "npm", "pack", "--ignore-scripts", "--pack-destination", packDir)
+		cmd := exec.CommandContext(ctx, "pnpm", "--config.ignore-scripts=true", "pack", "--skip-manifest-obfuscation", "--pack-destination", packDir)
 		cmd.Dir = dir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return nil, packDirs, fmt.Errorf("npm pack %s: %w", spec, err)
+			return nil, packDirs, fmt.Errorf("pnpm pack %s: %w", spec, err)
 		}
 		entries, err := os.ReadDir(packDir)
 		if err != nil {
@@ -292,13 +295,13 @@ func packLocalPluginSpecs(ctx context.Context, specs []string) ([]string, []stri
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".tgz") {
 				if archive != "" {
-					return nil, packDirs, fmt.Errorf("npm pack %s produced multiple archives", spec)
+					return nil, packDirs, fmt.Errorf("pnpm pack %s produced multiple archives", spec)
 				}
 				archive = entry.Name()
 			}
 		}
 		if archive == "" {
-			return nil, packDirs, fmt.Errorf("npm pack %s produced no archive", spec)
+			return nil, packDirs, fmt.Errorf("pnpm pack %s produced no archive", spec)
 		}
 		result[index] = filepath.Join(packDir, archive)
 	}
