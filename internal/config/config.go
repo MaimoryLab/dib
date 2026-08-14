@@ -15,6 +15,7 @@ var (
 	nodeVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	dshVersionPattern  = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]*$`)
 	packagePattern     = regexp.MustCompile(`^(?:@[0-9A-Za-z._-]+/)?[0-9A-Za-z._-]+$`)
+	bundleIDPattern    = regexp.MustCompile(`^[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)+$`)
 )
 
 type Config struct {
@@ -23,6 +24,7 @@ type Config struct {
 	Cache   string   `yaml:"cache"`
 	Node    Node     `yaml:"node"`
 	DSH     DSH      `yaml:"dsh"`
+	MacOS   MacOS    `yaml:"macos,omitempty"`
 	Runtime Runtime  `yaml:"runtime"`
 	Targets []Target `yaml:"targets"`
 }
@@ -36,6 +38,19 @@ type DSH struct {
 	Package string   `yaml:"package"`
 	Version string   `yaml:"version"`
 	Plugins []string `yaml:"plugins"`
+}
+
+type MacOS struct {
+	Format     string  `yaml:"format,omitempty"`
+	AppName    string  `yaml:"app_name,omitempty"`
+	BundleID   string  `yaml:"bundle_id,omitempty"`
+	VolumeName string  `yaml:"volume_name,omitempty"`
+	Sign       Signing `yaml:"sign,omitempty"`
+}
+
+type Signing struct {
+	Enabled  bool   `yaml:"enabled"`
+	Identity string `yaml:"identity,omitempty"`
 }
 
 type Runtime struct {
@@ -65,6 +80,7 @@ func Load(path string) (Config, error) {
 	if err := decoder.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
+	cfg.setDefaults()
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
@@ -75,6 +91,21 @@ func Load(path string) (Config, error) {
 	cfg.Output = resolvePath(base, cfg.Output)
 	cfg.Cache = resolvePath(base, cfg.Cache)
 	return cfg, nil
+}
+
+func (cfg *Config) setDefaults() {
+	if cfg.MacOS.Format == "" {
+		cfg.MacOS.Format = "tar.gz"
+	}
+	if cfg.MacOS.AppName == "" {
+		cfg.MacOS.AppName = "DeepSeek Harness"
+	}
+	if cfg.MacOS.BundleID == "" {
+		cfg.MacOS.BundleID = "ai.deepseek.dsh"
+	}
+	if cfg.MacOS.VolumeName == "" {
+		cfg.MacOS.VolumeName = cfg.MacOS.AppName
+	}
 }
 
 func (cfg Config) ModeFor(target Target) string {
@@ -102,6 +133,23 @@ func (cfg Config) validate() error {
 	}
 	if !dshVersionPattern.MatchString(cfg.DSH.Version) {
 		return errors.New("dsh.version contains invalid characters")
+	}
+	if cfg.MacOS.Format != "tar.gz" && cfg.MacOS.Format != "dmg" {
+		return errors.New("macos.format must be tar.gz or dmg")
+	}
+	if cfg.MacOS.Sign.Enabled {
+		if cfg.MacOS.Format != "dmg" {
+			return errors.New("macos.sign requires macos.format: dmg")
+		}
+		if strings.TrimSpace(cfg.MacOS.Sign.Identity) == "" {
+			return errors.New("macos.sign.identity is required when signing is enabled")
+		}
+	}
+	if strings.TrimSpace(cfg.MacOS.AppName) == "" || strings.TrimSpace(cfg.MacOS.VolumeName) == "" {
+		return errors.New("macos.app_name and macos.volume_name cannot be blank")
+	}
+	if !bundleIDPattern.MatchString(cfg.MacOS.BundleID) {
+		return errors.New("macos.bundle_id contains invalid characters")
 	}
 	if cfg.Runtime.Host != "127.0.0.1" {
 		return errors.New("runtime.host must be 127.0.0.1")

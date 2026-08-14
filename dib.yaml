@@ -12,6 +12,15 @@ dsh:
   # Prebuilt npm package specs added here are installed into the runtime.
   plugins: []
 
+macos:
+  format: dmg
+  app_name: DeepSeek Harness
+  bundle_id: ai.deepseek.dsh
+  volume_name: DeepSeek Harness
+  sign:
+    enabled: false
+    # identity: "Developer ID Application: Example Corp (TEAMID)"
+
 runtime:
   # gui uses the OS WebView; serve only starts the Web UI server.
   mode: gui

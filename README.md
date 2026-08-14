@@ -27,3 +27,26 @@ targets:
 Each archive contains `dshbox`, Node.js, `@deepseek-ai/dsh`, and packages listed in `dsh.plugins`. npm lifecycle scripts are disabled during packaging; preset plugins should therefore be published as built packages.
 
 `node.base_url` defaults to `https://nodejs.org/dist`; the example uses npmmirror for networks where nodejs.org is unavailable. The selected source must expose Node's normal `v<version>/SHASUMS256.txt` layout.
+
+## macOS DMG and signing
+
+`macos.format: dmg` creates a compressed DMG containing `DeepSeek Harness.app` and an Applications shortcut. DMG creation requires macOS. Use `tar.gz` to keep the portable archive layout.
+
+Unsigned builds need no identity:
+
+```yaml
+macos:
+  format: dmg
+  sign:
+    enabled: false
+```
+
+Signed builds sign and verify both the app bundle and final DMG:
+
+```yaml
+macos:
+  format: dmg
+  sign:
+    enabled: true
+    identity: "Developer ID Application: Example Corp (TEAMID)"
+```

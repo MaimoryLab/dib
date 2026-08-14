@@ -27,6 +27,9 @@ func serverCommand() (*exec.Cmd, string, error) {
 		return nil, "", err
 	}
 	root := filepath.Dir(executable)
+	if runtime.GOOS == "darwin" && filepath.Base(root) == "MacOS" {
+		root = filepath.Clean(filepath.Join(root, "..", "Resources"))
+	}
 	node := filepath.Join(root, "runtime", "node", "bin", "node")
 	if runtime.GOOS == "windows" {
 		node = filepath.Join(root, "runtime", "node", "node.exe")

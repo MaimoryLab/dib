@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -44,20 +46,33 @@ func buildTarget(ctx context.Context, cfg config.Config, target config.Target) e
 
 	name := fmt.Sprintf("dsh-%s-%s-%s", cfg.DSH.Version, target.OS, target.Arch)
 	root := filepath.Join(work, name)
-	if err := os.MkdirAll(filepath.Join(root, "runtime", "app"), 0o755); err != nil {
+	payloadRoot := root
+	launcherRoot := root
+	appPath := ""
+	dmgRoot := ""
+	if target.OS == "darwin" && cfg.MacOS.Format == "dmg" {
+		dmgRoot = filepath.Join(work, "dmg")
+		appPath = filepath.Join(dmgRoot, cfg.MacOS.AppName+".app")
+		payloadRoot = filepath.Join(appPath, "Contents", "Resources")
+		launcherRoot = filepath.Join(appPath, "Contents", "MacOS")
+	}
+	if err := os.MkdirAll(filepath.Join(payloadRoot, "runtime", "app"), 0o755); err != nil {
 		return err
 	}
-	if err := installNode(ctx, cfg, target, filepath.Join(root, "runtime", "node")); err != nil {
+	if err := installNode(ctx, cfg, target, filepath.Join(payloadRoot, "runtime", "node")); err != nil {
 		return err
 	}
-	if err := installDSH(ctx, cfg, target, filepath.Join(root, "runtime", "app")); err != nil {
+	if err := installDSH(ctx, cfg, target, filepath.Join(payloadRoot, "runtime", "app")); err != nil {
 		return err
 	}
-	if err := buildLauncher(ctx, cfg, target, root); err != nil {
+	if err := buildLauncher(ctx, cfg, target, launcherRoot); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(cfg.Output, 0o755); err != nil {
 		return err
+	}
+	if appPath != "" {
+		return writeDMG(ctx, cfg, name, dmgRoot, appPath)
 	}
 	if target.OS == "windows" {
 		return writeZip(filepath.Join(cfg.Output, name+".zip"), work, name)
@@ -103,11 +118,12 @@ func installDSH(ctx context.Context, cfg config.Config, target config.Target, ds
 	return nil
 }
 
-func buildLauncher(ctx context.Context, cfg config.Config, target config.Target, root string) error {
-	sourceDir := filepath.Join(filepath.Dir(root), "launcher")
-	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+func buildLauncher(ctx context.Context, cfg config.Config, target config.Target, outputDir string) error {
+	sourceDir, err := os.MkdirTemp("", "dib-launcher-")
+	if err != nil {
 		return err
 	}
+	defer os.RemoveAll(sourceDir)
 	files := []string{"main.go.txt", cfg.ModeFor(target) + ".go.txt"}
 	for _, name := range files {
 		data, err := launcherFiles.ReadFile("launcher/" + name)
@@ -125,7 +141,10 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 	if err := os.WriteFile(filepath.Join(sourceDir, "go.mod"), []byte(mod), 0o644); err != nil {
 		return err
 	}
-	output := filepath.Join(root, "dshbox")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return err
+	}
+	output := filepath.Join(outputDir, "dshbox")
 	if target.OS == "windows" {
 		output += ".exe"
 	}
@@ -151,6 +170,81 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("compile launcher (gui targets require a native C/C++ cross-toolchain): %w", err)
+	}
+	return nil
+}
+
+func writeDMG(ctx context.Context, cfg config.Config, name, dmgRoot, appPath string) error {
+	if runtime.GOOS != "darwin" {
+		return errors.New("creating a DMG requires macOS")
+	}
+	if err := writeInfoPlist(cfg, appPath); err != nil {
+		return err
+	}
+	if err := os.Symlink("/Applications", filepath.Join(dmgRoot, "Applications")); err != nil {
+		return err
+	}
+	if cfg.MacOS.Sign.Enabled {
+		if err := codesign(ctx, cfg.MacOS.Sign.Identity, appPath, true); err != nil {
+			return err
+		}
+	}
+	output := filepath.Join(cfg.Output, name+".dmg")
+	cmd := exec.CommandContext(ctx, "hdiutil", "create", "-volname", cfg.MacOS.VolumeName, "-srcfolder", dmgRoot, "-ov", "-format", "UDZO", output)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("create DMG: %w", err)
+	}
+	if cfg.MacOS.Sign.Enabled {
+		if err := codesign(ctx, cfg.MacOS.Sign.Identity, output, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeInfoPlist(cfg config.Config, appPath string) error {
+	escape := func(value string) string {
+		var result strings.Builder
+		_ = xml.EscapeText(&result, []byte(value))
+		return result.String()
+	}
+	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key><string>%s</string>
+  <key>CFBundleExecutable</key><string>dshbox</string>
+  <key>CFBundleIdentifier</key><string>%s</string>
+  <key>CFBundleName</key><string>%s</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+`, escape(cfg.MacOS.AppName), escape(cfg.MacOS.BundleID), escape(cfg.MacOS.AppName))
+	return os.WriteFile(filepath.Join(appPath, "Contents", "Info.plist"), []byte(plist), 0o644)
+}
+
+func codesign(ctx context.Context, identity, path string, deep bool) error {
+	args := []string{"--force", "--sign", identity}
+	if deep {
+		args = append(args, "--deep")
+	}
+	args = append(args, path)
+	cmd := exec.CommandContext(ctx, "codesign", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("sign %s: %w", filepath.Base(path), err)
+	}
+	verifyArgs := []string{"--verify", "--strict"}
+	if deep {
+		verifyArgs = append(verifyArgs, "--deep")
+	}
+	verifyArgs = append(verifyArgs, path)
+	if output, err := exec.CommandContext(ctx, "codesign", verifyArgs...).CombinedOutput(); err != nil {
+		return fmt.Errorf("verify signature for %s: %w: %s", filepath.Base(path), err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

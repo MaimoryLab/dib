@@ -32,4 +32,12 @@ targets:
 	if cfg.Output != filepath.Join(dir, "dist") {
 		t.Fatalf("output = %q", cfg.Output)
 	}
+	if cfg.MacOS.Format != "tar.gz" {
+		t.Fatalf("macos format = %q, want tar.gz", cfg.MacOS.Format)
+	}
+	cfg.MacOS.Format = "dmg"
+	cfg.MacOS.Sign.Enabled = true
+	if err := cfg.validate(); err == nil {
+		t.Fatal("signed DMG without an identity was accepted")
+	}
 }
