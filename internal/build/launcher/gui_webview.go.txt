@@ -38,7 +38,7 @@ func newGUIWindow(url string) (*guiWindow, error) {
 	}
 	w.SetTitle("DeepSeek Harness")
 	w.SetSize(1280, 800, webview.HintNone)
-	w.Init(droppedFilesScript + "\n" + dshVersionScript())
+	w.Init(inputBehaviorScript + "\n" + droppedFilesScript + "\n" + dshVersionScript())
 	w.Navigate(url)
 	if err := w.Bind("dshboxNotify", func(request notificationRequest) error {
 		if strings.TrimSpace(request.Title) == "" || strings.TrimSpace(request.Body) == "" {

@@ -144,7 +144,7 @@ func newGUIWindow(url string) (*guiWindow, error) {
 	runtime.LockOSThread()
 	titleCString := C.CString("DeepSeek Harness")
 	urlCString := C.CString(url)
-	filesScriptCString := C.CString(droppedFilesScript + "\n" + dshVersionScript())
+	filesScriptCString := C.CString(inputBehaviorScript + "\n" + droppedFilesScript + "\n" + dshVersionScript())
 	bridgeScriptCString := C.CString(bridgeScript)
 	defer C.free(unsafe.Pointer(titleCString))
 	defer C.free(unsafe.Pointer(urlCString))

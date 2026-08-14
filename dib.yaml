@@ -15,7 +15,7 @@ dsh:
     - ./plugins/dsh-desktop
 
 macos:
-  format: dmg
+  format: tar.gz
   app_name: DeepSeek Harness
   bundle_id: ai.deepseek.dsh
   volume_name: DeepSeek Harness

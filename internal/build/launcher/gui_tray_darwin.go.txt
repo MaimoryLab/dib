@@ -4,6 +4,7 @@ package main
 #cgo darwin CFLAGS: -x objective-c
 #cgo darwin LDFLAGS: -framework Cocoa
 #import <Cocoa/Cocoa.h>
+#include <stdlib.h>
 
 @interface DSHTrayController : NSObject <NSWindowDelegate>
 @property(nonatomic, assign) NSWindow *window;
@@ -59,7 +60,7 @@ static DSHTrayController *dsh_tray_controller;
 }
 @end
 
-static int dsh_tray_init(void *handle) {
+static int dsh_tray_init(void *handle, const char *icon_path) {
 	NSWindow *window = (NSWindow *)handle;
 	if (window == nil) return 0;
 	dsh_tray_controller = [[DSHTrayController alloc] init];
@@ -79,9 +80,10 @@ static int dsh_tray_init(void *handle) {
 	button.target = dsh_tray_controller;
 	button.action = @selector(trayClicked:);
 	[button sendActionOn:NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp];
-	NSImage *icon = [[NSApp applicationIconImage] copy];
+	NSImage *icon = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:icon_path]];
+	if (icon == nil) icon = [[NSApp applicationIconImage] copy];
 	if (icon != nil) {
-		icon.template = YES;
+		icon.template = NO;
 		button.image = icon;
 		[icon release];
 	}
@@ -104,11 +106,23 @@ import "C"
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"unsafe"
 )
 
 func nativeTrayInit(handle unsafe.Pointer) error {
-	if C.dsh_tray_init(handle) == 0 {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	root := filepath.Dir(executable)
+	if filepath.Base(root) == "MacOS" {
+		root = filepath.Clean(filepath.Join(root, "..", "Resources"))
+	}
+	iconPath := C.CString(filepath.Join(root, "icon.png"))
+	defer C.free(unsafe.Pointer(iconPath))
+	if C.dsh_tray_init(handle, iconPath) == 0 {
 		return errors.New("create macOS menu-bar icon")
 	}
 	return nil

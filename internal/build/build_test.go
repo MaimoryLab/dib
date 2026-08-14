@@ -484,3 +484,33 @@ func TestAppCacheKeyIncludesInputsAndPluginContents(t *testing.T) {
 		t.Fatal("cache key did not change with plugin contents or target")
 	}
 }
+
+func TestDesktopPluginDoesNotInvalidateAppCache(t *testing.T) {
+	desktop := filepath.Join(t.TempDir(), "desktop")
+	if err := os.Mkdir(desktop, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(desktop, "package.json"), []byte(`{"name":"@maimorylab/dsh-desktop"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plugins, desktopPlugins := splitDesktopPluginSpecs([]string{"@example/plugin@1.0.0", desktop})
+	if len(plugins) != 1 || plugins[0] != "@example/plugin@1.0.0" || len(desktopPlugins) != 1 || desktopPlugins[0] != desktop {
+		t.Fatalf("plugins = %v, desktop = %v", plugins, desktopPlugins)
+	}
+	target := config.Target{OS: "darwin", Arch: "arm64"}
+	first, err := appCacheKey("24.19.0", target, append([]string{"@deepseek-ai/dsh@1.0.0", "@deepseek-ai/dsh-tools@1.0.0"}, plugins...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(desktop, "package.json"), []byte(`{"name":"@maimorylab/dsh-desktop","version":"2.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plugins, _ = splitDesktopPluginSpecs([]string{"@example/plugin@1.0.0", desktop})
+	second, err := appCacheKey("24.19.0", target, append([]string{"@deepseek-ai/dsh@1.0.0", "@deepseek-ai/dsh-tools@1.0.0"}, plugins...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("desktop plugin contents invalidated the app cache")
+	}
+}

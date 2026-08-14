@@ -36,7 +36,7 @@ var launcherFiles embed.FS
 
 const desktopPluginName = "@maimorylab/dsh-desktop"
 
-const appCacheVersion = "4"
+const appCacheVersion = "5"
 
 func Run(ctx context.Context, cfg config.Config) error {
 	for _, target := range cfg.Targets {
@@ -98,6 +98,19 @@ func buildTarget(ctx context.Context, cfg config.Config, target config.Target) e
 	if err := buildLauncher(ctx, cfg, target, launcherRoot); err != nil {
 		return err
 	}
+	if target.OS == "darwin" && cfg.Icon != "" {
+		iconRoot := root
+		if cfg.MacOS.Format == "dmg" {
+			iconRoot = payloadRoot
+		}
+		iconData, err := os.ReadFile(cfg.Icon)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(iconRoot, "icon.png"), iconData, 0o644); err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(cfg.Output, 0o755); err != nil {
 		return err
 	}
@@ -155,53 +168,77 @@ func installNode(ctx context.Context, cfg config.Config, target config.Target, d
 
 func installDSH(ctx context.Context, cfg config.Config, target config.Target, dst string) error {
 	specs := []string{cfg.DSH.Package + "@" + cfg.DSH.Version}
-	plugins, packDirs, err := packLocalPluginSpecs(ctx, cfg.DSH.Plugins)
-	if err != nil {
-		for _, dir := range packDirs {
-			_ = os.RemoveAll(dir)
-		}
-		return err
+	plugins, desktopPlugins := splitDesktopPluginSpecs(cfg.DSH.Plugins)
+	if len(desktopPlugins) > 0 {
+		specs = append(specs, "@deepseek-ai/dsh-tools@"+cfg.DSH.Version)
 	}
-	defer func() {
-		for _, dir := range packDirs {
-			_ = os.RemoveAll(dir)
-		}
-	}()
-	for _, spec := range cfg.DSH.Plugins {
-		if name, _ := pluginPackageName(spec); name == desktopPluginName {
-			specs = append(specs, "@deepseek-ai/dsh-tools@"+cfg.DSH.Version)
-			break
-		}
-	}
-	specs = append(specs, plugins...)
-	cacheSpecs := append([]string{cfg.DSH.Package + "@" + cfg.DSH.Version}, cfg.DSH.Plugins...)
+	cacheSpecs := append(append([]string(nil), specs...), plugins...)
 	cacheKey, err := appCacheKey(cfg.Node.Version, target, cacheSpecs)
 	if err != nil {
 		return err
 	}
 	cacheDir := filepath.Join(cfg.Cache, "app", cacheKey)
+	add := func(specs []string) error {
+		args := []string{"add", "--dir", dst, "--store-dir", filepath.Join(cfg.Cache, "pnpm"), "--prefer-offline", "--prod", "--ignore-scripts", "--lockfile=false", "--config.node-linker=hoisted", "--config.package-import-method=copy", "--config.minimum-release-age=0", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
+		cmd := exec.CommandContext(ctx, "pnpm", append(args, specs...)...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("pnpm add: %w", err)
+		}
+		return os.RemoveAll(filepath.Join(dst, "node_modules", ".bin"))
+	}
 	if _, err := os.Stat(filepath.Join(cacheDir, ".ready")); err == nil {
 		fmt.Println("using cached DSH runtime")
 		if err := os.CopyFS(dst, os.DirFS(filepath.Join(cacheDir, "root"))); err != nil {
 			return err
 		}
-		return exposePluginDependencies(dst, cfg.DSH.Package, cfg.DSH.Plugins)
+	} else {
+		packed, packDirs, err := packLocalPluginSpecs(ctx, plugins)
+		defer func() {
+			for _, dir := range packDirs {
+				_ = os.RemoveAll(dir)
+			}
+		}()
+		if err != nil {
+			return err
+		}
+		if err := add(append(specs, packed...)); err != nil {
+			return err
+		}
+		if err := exposePluginDependencies(dst, cfg.DSH.Package, plugins); err != nil {
+			return err
+		}
+		if err := storeAppCache(cacheDir, dst); err != nil {
+			return err
+		}
 	}
-	args := []string{"add", "--dir", dst, "--store-dir", filepath.Join(cfg.Cache, "pnpm"), "--prefer-offline", "--prod", "--ignore-scripts", "--lockfile=false", "--config.node-linker=hoisted", "--config.package-import-method=copy", "--config.minimum-release-age=0", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
-	args = append(args, specs...)
-	cmd := exec.CommandContext(ctx, "pnpm", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pnpm add: %w", err)
+	if len(desktopPlugins) > 0 {
+		packed, packDirs, err := packLocalPluginSpecs(ctx, desktopPlugins)
+		defer func() {
+			for _, dir := range packDirs {
+				_ = os.RemoveAll(dir)
+			}
+		}()
+		if err != nil {
+			return err
+		}
+		if err := add(packed); err != nil {
+			return err
+		}
 	}
-	if err := os.RemoveAll(filepath.Join(dst, "node_modules", ".bin")); err != nil {
-		return err
+	return exposePluginDependencies(dst, cfg.DSH.Package, cfg.DSH.Plugins)
+}
+
+func splitDesktopPluginSpecs(specs []string) (plugins, desktop []string) {
+	for _, spec := range specs {
+		if name, _ := pluginPackageName(spec); name == desktopPluginName {
+			desktop = append(desktop, spec)
+		} else {
+			plugins = append(plugins, spec)
+		}
 	}
-	if err := exposePluginDependencies(dst, cfg.DSH.Package, cfg.DSH.Plugins); err != nil {
-		return err
-	}
-	return storeAppCache(cacheDir, dst)
+	return plugins, desktop
 }
 
 func appCacheKey(nodeVersion string, target config.Target, specs []string) (string, error) {

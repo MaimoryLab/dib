@@ -44,6 +44,11 @@ func TestTrayOwnsWindowLifecycle(t *testing.T) {
 			t.Errorf("macOS tray is missing %q", want)
 		}
 	}
+	for _, want := range []string{"initWithContentsOfFile", "icon.png", "icon.template = NO"} {
+		if !strings.Contains(string(darwin), want) {
+			t.Errorf("macOS tray icon handling is missing %q", want)
+		}
+	}
 	webview, err := launcherFiles.ReadFile("launcher/gui_webview.go.txt")
 	if err != nil {
 		t.Fatal(err)

@@ -16,6 +16,8 @@ var (
 	dshVersion = "unknown"
 )
 
+const inputBehaviorScript = `document.documentElement.spellcheck=false;document.documentElement.setAttribute("autocapitalize","off");`
+
 func dshVersionScript() string {
 	return "window.dshboxVersion=" + strconv.Quote(dshVersion) + ";"
 }
