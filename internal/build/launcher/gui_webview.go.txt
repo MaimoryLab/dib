@@ -2,12 +2,26 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 
 	webview "github.com/webview/webview_go"
 )
 
 type guiWindow struct {
 	webview.WebView
+}
+
+type menuItem struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Parent string `json:"parent"`
+	Order  int    `json:"order"`
+}
+
+var activeMenuWindow struct {
+	sync.Mutex
+	w webview.WebView
 }
 
 func newGUIWindow(url string) (*guiWindow, error) {
@@ -19,6 +33,21 @@ func newGUIWindow(url string) (*guiWindow, error) {
 	w.SetSize(1280, 800, webview.HintNone)
 	w.Navigate(url)
 	installNativeMenu(w.Window(), dshVersion)
+	activeMenuWindow.Lock()
+	activeMenuWindow.w = w
+	activeMenuWindow.Unlock()
+	if err := w.Bind("dshboxMenuRegister", func(item menuItem) error {
+		return nativeMenuRegister(item.ID, item.Label, item.Parent, item.Order)
+	}); err != nil {
+		w.Destroy()
+		return nil, fmt.Errorf("bind menu registration: %w", err)
+	}
+	if err := w.Bind("dshboxMenuUnregister", func(id string) error {
+		return nativeMenuUnregister(id)
+	}); err != nil {
+		w.Destroy()
+		return nil, fmt.Errorf("bind menu removal: %w", err)
+	}
 	return &guiWindow{WebView: w}, nil
 }
 
@@ -26,5 +55,18 @@ func (w *guiWindow) run()       { w.Run() }
 func (w *guiWindow) terminate() { w.Terminate() }
 func (w *guiWindow) destroy() {
 	uninstallNativeMenu(w.Window())
+	activeMenuWindow.Lock()
+	activeMenuWindow.w = nil
+	activeMenuWindow.Unlock()
 	w.Destroy()
+}
+
+func nativeMenuAction(id string) {
+	activeMenuWindow.Lock()
+	w := activeMenuWindow.w
+	activeMenuWindow.Unlock()
+	if w == nil {
+		return
+	}
+	w.Eval(fmt.Sprintf("window.dispatchEvent(new CustomEvent('dshbox:menu-select',{detail:%q}))", id))
 }

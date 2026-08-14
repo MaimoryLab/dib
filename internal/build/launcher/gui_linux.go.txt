@@ -29,7 +29,19 @@ static DSHWindow *dsh_window_new(const char *title, const char *url) {
 	}
 	DSHWindow *window = g_new0(DSHWindow, 1);
 	window->window = gtk_window_new();
-	GtkWidget *webview = webkit_web_view_new();
+	WebKitUserContentManager *manager = webkit_user_content_manager_new();
+	WebKitUserScript *script = webkit_user_script_new(
+		"(() => { const items = new Map(); let root; const redraw = () => {\n"
+		"if (!document.body) return; if (!root) { root = document.createElement('nav'); root.id = 'dshbox-menu'; root.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;display:flex;background:#202124;color:#fff;font:14px sans-serif'; document.body.prepend(root); }\n"
+		"root.replaceChildren(...[...items.values()].sort((a,b)=>(a.order||0)-(b.order||0)).map(item => { const button=document.createElement('button'); button.textContent=item.label; button.style.cssText='border:0;background:transparent;color:inherit;padding:7px 12px;cursor:pointer'; button.onclick=()=>window.dispatchEvent(new CustomEvent('dshbox:menu-select',{detail:item.id})); return button; })); };\n"
+		"window.dshboxMenuRegister = item => { items.set(item.id,item); redraw(); }; window.dshboxMenuUnregister = id => { items.delete(id); redraw(); }; })()",
+		WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
+		WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+		NULL);
+	webkit_user_content_manager_add_script(manager, script);
+	webkit_user_script_unref(script);
+	GtkWidget *webview = webkit_web_view_new_with_user_content_manager(manager);
+	g_object_unref(manager);
 	gtk_window_set_title(GTK_WINDOW(window->window), title);
 	gtk_window_set_default_size(GTK_WINDOW(window->window), 1280, 800);
 	gtk_window_set_child(GTK_WINDOW(window->window), webview);

@@ -5,20 +5,26 @@ package main
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+extern void dshMenuAction(char *id);
 
 #define DSH_MENU_ABOUT 41001
 
 static HWND dsh_menu_window;
 static WNDPROC dsh_menu_previous_proc;
 static HMENU dsh_menu_handle;
+static HMENU dsh_menu_help;
 static wchar_t dsh_menu_version[128];
+static struct { UINT command; char id[128]; } dsh_menu_items[128];
+static int dsh_menu_item_count;
 
 static LRESULT CALLBACK dsh_menu_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
-	if (message == WM_COMMAND && LOWORD(wparam) == DSH_MENU_ABOUT) {
-		wchar_t text[256];
-		_snwprintf_s(text, 256, _TRUNCATE, L"DeepSeek Harness\nVersion: %ls", dsh_menu_version);
-		MessageBoxW(hwnd, text, L"About DeepSeek Harness", MB_OK | MB_ICONINFORMATION);
-		return 0;
+	for (int i = 0; i < dsh_menu_item_count; i++) {
+		if (LOWORD(wparam) == dsh_menu_items[i].command) {
+			dshMenuAction(dsh_menu_items[i].id);
+			return 0;
+		}
 	}
 	return CallWindowProcW(dsh_menu_previous_proc, hwnd, message, wparam, lparam);
 }
@@ -27,11 +33,41 @@ static void dsh_menu_install(void *handle, const char *version) {
 	dsh_menu_window = (HWND)handle;
 	MultiByteToWideChar(CP_UTF8, 0, version, -1, dsh_menu_version, 128);
 	dsh_menu_handle = CreateMenu();
-	HMENU help = CreatePopupMenu();
-	AppendMenuW(help, MF_STRING, DSH_MENU_ABOUT, L"About");
-	AppendMenuW(dsh_menu_handle, MF_POPUP, (UINT_PTR)help, L"Help");
+	dsh_menu_help = CreatePopupMenu();
+	AppendMenuW(dsh_menu_handle, MF_POPUP, (UINT_PTR)dsh_menu_help, L"Help");
 	SetMenu(dsh_menu_window, dsh_menu_handle);
+	dsh_menu_item_count = 0;
 	dsh_menu_previous_proc = (WNDPROC)SetWindowLongPtrW(dsh_menu_window, GWLP_WNDPROC, (LONG_PTR)dsh_menu_proc);
+}
+
+static int dsh_menu_add(const char *id, const char *label, const char *parent, int order) {
+	(void)order;
+	if (dsh_menu_item_count >= 128) return 0;
+	HMENU menu = strcmp(parent, "help") == 0 ? dsh_menu_help : dsh_menu_handle;
+	UINT command = 42000 + dsh_menu_item_count;
+	int length = MultiByteToWideChar(CP_UTF8, 0, label, -1, NULL, 0);
+	wchar_t *wide = (wchar_t *)calloc((size_t)length, sizeof(wchar_t));
+	MultiByteToWideChar(CP_UTF8, 0, label, -1, wide, length);
+	AppendMenuW(menu, MF_STRING, command, wide);
+	free(wide);
+	dsh_menu_items[dsh_menu_item_count].command = command;
+	strncpy_s(dsh_menu_items[dsh_menu_item_count].id, 128, id, _TRUNCATE);
+	dsh_menu_item_count++;
+	DrawMenuBar(dsh_menu_window);
+	return 1;
+}
+
+static int dsh_menu_remove(const char *id) {
+	for (int i = 0; i < dsh_menu_item_count; i++) {
+		if (strcmp(dsh_menu_items[i].id, id) == 0) {
+			DeleteMenu(dsh_menu_help, dsh_menu_items[i].command, MF_BYCOMMAND);
+			for (int j = i + 1; j < dsh_menu_item_count; j++) dsh_menu_items[j - 1] = dsh_menu_items[j];
+			dsh_menu_item_count--;
+			DrawMenuBar(dsh_menu_window);
+			return 1;
+		}
+	}
+	return 0;
 }
 
 static void dsh_menu_uninstall(void *handle) {
@@ -46,17 +82,45 @@ static void dsh_menu_uninstall(void *handle) {
 		DestroyMenu(dsh_menu_handle);
 		dsh_menu_handle = NULL;
 	}
+	dsh_menu_help = NULL;
+	dsh_menu_item_count = 0;
 	dsh_menu_window = NULL;
 }
 */
 import "C"
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
 
 func installNativeMenu(handle unsafe.Pointer, version string) {
 	value := C.CString(version)
 	defer C.free(unsafe.Pointer(value))
 	C.dsh_menu_install(handle, value)
+}
+
+//export dshMenuAction
+func dshMenuAction(id *C.char) { nativeMenuAction(C.GoString(id)) }
+
+func nativeMenuRegister(id, label, parent string, order int) error {
+	idValue := C.CString(id)
+	labelValue := C.CString(label)
+	parentValue := C.CString(parent)
+	defer C.free(unsafe.Pointer(idValue))
+	defer C.free(unsafe.Pointer(labelValue))
+	defer C.free(unsafe.Pointer(parentValue))
+	if C.dsh_menu_add(idValue, labelValue, parentValue, C.int(order)) == 0 {
+		return errors.New("native menu limit reached")
+	}
+	return nil
+}
+
+func nativeMenuUnregister(id string) error {
+	value := C.CString(id)
+	defer C.free(unsafe.Pointer(value))
+	C.dsh_menu_remove(value)
+	return nil
 }
 
 func uninstallNativeMenu(handle unsafe.Pointer) { C.dsh_menu_uninstall(handle) }

@@ -5,9 +5,13 @@ package main
 #cgo darwin LDFLAGS: -framework Cocoa
 #import <Cocoa/Cocoa.h>
 #include <stdlib.h>
+#include <string.h>
+
+extern void dshMenuAction(char *id);
 
 @interface DSHMenuTarget : NSObject
 @property(nonatomic, copy) NSString *version;
+- (void)selectMenu:(id)sender;
 @end
 
 @implementation DSHMenuTarget
@@ -19,9 +23,15 @@ package main
 	[alert addButtonWithTitle:@"OK"];
 	[alert runModal];
 }
+- (void)selectMenu:(id)sender {
+	NSString *identifier = [sender representedObject];
+	if (identifier != nil) dshMenuAction((char *)[identifier UTF8String]);
+}
 @end
 
 static DSHMenuTarget *dsh_menu_target;
+static NSMenu *dsh_menu_help;
+static NSMutableDictionary<NSString *, NSMenuItem *> *dsh_menu_items;
 
 static void dsh_menu_install(void *handle, const char *version) {
 	(void)handle;
@@ -34,27 +44,76 @@ static void dsh_menu_install(void *handle, const char *version) {
 	}
 	NSMenuItem *helpItem = [[NSMenuItem alloc] initWithTitle:@"Help" action:nil keyEquivalent:@""];
 	NSMenu *help = [[NSMenu alloc] initWithTitle:@"Help"];
-	NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:@"About DeepSeek Harness" action:@selector(showAbout:) keyEquivalent:@""];
-	[about setTarget:dsh_menu_target];
-	[help addItem:about];
+	dsh_menu_help = help;
+	dsh_menu_items = [NSMutableDictionary dictionary];
 	[main addItem:helpItem];
 	[main setSubmenu:help forItem:helpItem];
+}
+
+static int dsh_menu_add(const char *id, const char *label, const char *parent, int order) {
+	(void)order;
+	NSString *identifier = [NSString stringWithUTF8String:id];
+	NSString *title = [NSString stringWithUTF8String:label];
+	NSMenu *menu = strcmp(parent, "help") == 0 ? dsh_menu_help : [NSApp mainMenu];
+	NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:@selector(selectMenu:) keyEquivalent:@""];
+	item.target = dsh_menu_target;
+	item.representedObject = identifier;
+	[menu addItem:item];
+	dsh_menu_items[identifier] = item;
+	return 1;
+}
+
+static int dsh_menu_remove(const char *id) {
+	NSString *identifier = [NSString stringWithUTF8String:id];
+	NSMenuItem *item = dsh_menu_items[identifier];
+	if (item == nil) return 0;
+	[item.menu removeItem:item];
+	[dsh_menu_items removeObjectForKey:identifier];
+	return 1;
 }
 
 static void dsh_menu_uninstall(void *handle) {
 	(void)handle;
 	[dsh_menu_target release];
 	dsh_menu_target = nil;
+	dsh_menu_items = nil;
+	dsh_menu_help = nil;
 }
 */
 import "C"
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
 
 func installNativeMenu(handle unsafe.Pointer, version string) {
 	value := C.CString(version)
 	defer C.free(unsafe.Pointer(value))
 	C.dsh_menu_install(handle, value)
+}
+
+//export dshMenuAction
+func dshMenuAction(id *C.char) { nativeMenuAction(C.GoString(id)) }
+
+func nativeMenuRegister(id, label, parent string, order int) error {
+	idValue := C.CString(id)
+	labelValue := C.CString(label)
+	parentValue := C.CString(parent)
+	defer C.free(unsafe.Pointer(idValue))
+	defer C.free(unsafe.Pointer(labelValue))
+	defer C.free(unsafe.Pointer(parentValue))
+	if C.dsh_menu_add(idValue, labelValue, parentValue, C.int(order)) == 0 {
+		return errors.New("native menu registration failed")
+	}
+	return nil
+}
+
+func nativeMenuUnregister(id string) error {
+	value := C.CString(id)
+	defer C.free(unsafe.Pointer(value))
+	C.dsh_menu_remove(value)
+	return nil
 }
 
 func uninstallNativeMenu(handle unsafe.Pointer) { C.dsh_menu_uninstall(handle) }

@@ -19,5 +19,5 @@
       ]
     }
   },
-  "files": ["lib/index.js", "lib/client.js"]
+  "files": ["lib/index.js", "lib/client.js", "README.md"]
 }
