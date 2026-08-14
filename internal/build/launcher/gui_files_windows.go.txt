@@ -2,10 +2,10 @@ package main
 
 /*
 #cgo windows LDFLAGS: -lcomdlg32 -lshell32
+#include <windows.h>
 #include <commdlg.h>
 #include <shellapi.h>
 #include <stdlib.h>
-#include <windows.h>
 
 static int dsh_choose_files(int multiple, wchar_t *buffer, DWORD size, DWORD *error) {
 	OPENFILENAMEW dialog = {0};

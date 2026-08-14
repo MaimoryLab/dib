@@ -178,7 +178,10 @@ func TestLinuxGUILauncherUsesGTK4(t *testing.T) {
 	if !strings.Contains(text, "#cgo pkg-config: gtk4 webkitgtk-6.0") {
 		t.Fatal("Linux GUI launcher does not use GTK4 and WebKitGTK 6.0")
 	}
-	for _, old := range []string{"gtk+-3.0", "webkit2gtk-4.0"} {
+	if !strings.Contains(text, `g_object_new(WEBKIT_TYPE_WEB_VIEW, "user-content-manager"`) {
+		t.Fatal("Linux GUI launcher does not construct WebKitGTK 6.0 web view")
+	}
+	for _, old := range []string{"gtk+-3.0", "webkit2gtk-4.0", "webkit_web_view_new_with_user_content_manager"} {
 		if strings.Contains(text, old) {
 			t.Fatalf("Linux GUI launcher still references %q", old)
 		}

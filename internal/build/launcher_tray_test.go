@@ -52,3 +52,16 @@ func TestTrayOwnsWindowLifecycle(t *testing.T) {
 		t.Error("native window hooks are not removed in reverse installation order")
 	}
 }
+
+func TestWindowsHeadersUseWin32TypesBeforeShellAPI(t *testing.T) {
+	for _, name := range []string{"launcher/gui_tray_windows.go.txt", "launcher/gui_files_windows.go.txt"} {
+		source, err := launcherFiles.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(source)
+		if strings.Index(text, "#include <windows.h>") > strings.Index(text, "#include <shellapi.h>") {
+			t.Errorf("%s includes shellapi.h before windows.h", name)
+		}
+	}
+}
