@@ -44,7 +44,7 @@ func TestTrayOwnsWindowLifecycle(t *testing.T) {
 			t.Errorf("macOS tray is missing %q", want)
 		}
 	}
-	for _, want := range []string{"initWithContentsOfFile", "icon.png", "icon.template = NO"} {
+	for _, want := range []string{"initWithContentsOfFile", "icon.png", "icon.template = NO", "NSImageScaleProportionallyDown", "NSMakeSize(18.0, 18.0)"} {
 		if !strings.Contains(string(darwin), want) {
 			t.Errorf("macOS tray icon handling is missing %q", want)
 		}

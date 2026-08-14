@@ -77,6 +77,7 @@ static int dsh_tray_init(void *handle, const char *icon_path) {
 	}
 	NSButton *button = dsh_tray_item.button;
 	button.toolTip = @"DeepSeek Harness";
+	button.imageScaling = NSImageScaleProportionallyDown;
 	button.target = dsh_tray_controller;
 	button.action = @selector(trayClicked:);
 	[button sendActionOn:NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp];
@@ -84,6 +85,7 @@ static int dsh_tray_init(void *handle, const char *icon_path) {
 	if (icon == nil) icon = [[NSApp applicationIconImage] copy];
 	if (icon != nil) {
 		icon.template = NO;
+		icon.size = NSMakeSize(18.0, 18.0);
 		button.image = icon;
 		[icon release];
 	}
