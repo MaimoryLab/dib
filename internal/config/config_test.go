@@ -41,6 +41,12 @@ targets:
 	if cfg.Linux.Depends.Deb[0] != "libgtk-4-1" || cfg.Linux.Depends.RPM[0] != "gtk4" {
 		t.Fatalf("unexpected Linux GUI dependencies: %+v", cfg.Linux.Depends)
 	}
+	if err := cfg.SetDSHVersion("0.2.0-rc.1"); err != nil || cfg.DSH.Version != "0.2.0-rc.1" {
+		t.Fatalf("set DSH version: version=%q err=%v", cfg.DSH.Version, err)
+	}
+	if err := cfg.SetDSHVersion("bad version"); err == nil {
+		t.Fatal("invalid DSH version was accepted")
+	}
 	cfg.MacOS.Format = "dmg"
 	cfg.MacOS.Sign.Enabled = true
 	if err := cfg.validate(); err == nil {

@@ -181,6 +181,14 @@ func (cfg Config) ModeFor(target Target) string {
 	return cfg.Runtime.Mode
 }
 
+func (cfg *Config) SetDSHVersion(version string) error {
+	if !dshVersionPattern.MatchString(version) {
+		return errors.New("dsh version contains invalid characters")
+	}
+	cfg.DSH.Version = version
+	return nil
+}
+
 func (cfg Config) validate() error {
 	if cfg.Version != 1 {
 		return fmt.Errorf("version must be 1, got %d", cfg.Version)

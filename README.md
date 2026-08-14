@@ -86,3 +86,7 @@ linux:
 ```
 
 Dependency package names vary between distributions; set both lists for the distributions you publish to.
+
+## Official releases
+
+Run the `Release official DSH` workflow manually and enter an exact published DSH version without a leading `v`. It builds unsigned macOS DMGs, Windows NSIS installers, and Linux DEB/RPM packages for amd64 and arm64, then publishes them under the matching `v<dsh-version>` GitHub Release. Official release builds always exclude preset plugins.

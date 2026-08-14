@@ -1,0 +1,275 @@
+name: Release official DSH
+
+on:
+  workflow_dispatch:
+    inputs:
+      dsh_version:
+        description: Exact @deepseek-ai/dsh version, for example 0.1.0-rc.6
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dsh-${{ inputs.dsh_version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate DSH version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+
+      - name: Resolve official package
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.dsh_version }}
+        run: |
+          set -euo pipefail
+          resolved="$(npm view "@deepseek-ai/dsh@$REQUESTED_VERSION" version)"
+          if [[ "$resolved" != "$REQUESTED_VERSION" ]]; then
+            echo "dsh_version must be an exact published version; resolved '$resolved'" >&2
+            exit 1
+          fi
+          echo "version=$resolved" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Test packager
+        run: go test ./...
+
+  macos:
+    needs: prepare
+    name: Build macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: macos-15-intel}
+          - {arch: arm64, runner: macos-15}
+    env:
+      CC: clang
+      CXX: clang++
+      DSH_VERSION: ${{ needs.prepare.outputs.version }}
+      TARGET: darwin/${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+
+      - name: Build DMG
+        shell: bash
+        run: go run . -target "$TARGET" -dsh-version "$DSH_VERSION" -no-plugins
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: dsh-darwin-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    needs: prepare
+    name: Build Windows ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: windows-2025, cc: gcc, cxx: g++}
+          - {arch: arm64, runner: windows-11-arm, cc: aarch64-w64-mingw32-clang, cxx: aarch64-w64-mingw32-clang++}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      DSH_VERSION: ${{ needs.prepare.outputs.version }}
+      TARGET: windows/${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+
+      - name: Install Windows ARM64 C toolchain
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          $version = '20260616'
+          $archive = Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip'
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$version/llvm-mingw-$version-ucrt-aarch64.zip"
+          curl.exe -fL $url -o $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = '312593669435bd0bfc1a43ac3fba23c8b27e0610bade88b2738e5a01702a99ba'
+          if ($actual -ne $expected) {
+            throw "LLVM-MinGW checksum mismatch: $actual"
+          }
+          tar -xf $archive -C $env:RUNNER_TEMP
+          $bin = Join-Path $env:RUNNER_TEMP "llvm-mingw-$version-ucrt-aarch64\bin"
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Check NSIS
+        id: nsis
+        shell: pwsh
+        run: |
+          if (Get-Command makensis -ErrorAction SilentlyContinue) {
+            "installed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            makensis /VERSION
+          } else {
+            "installed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - name: Install NSIS
+        if: steps.nsis.outputs.installed != 'true'
+        uses: repolevedavaj/install-nsis@v1.2.1
+        with:
+          nsis-version: '3.12'
+
+      - name: Verify Windows build tools
+        shell: pwsh
+        run: |
+          Get-Command $env:CC
+          Get-Command $env:CXX
+          Get-Command makensis
+
+      - name: Build NSIS installer
+        run: go run . -target "$env:TARGET" -dsh-version "$env:DSH_VERSION" -no-plugins
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: dsh-windows-${{ matrix.arch }}
+          path: dist/*-installer.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  linux:
+    needs: prepare
+    name: Build Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    env:
+      CC: gcc
+      CXX: g++
+      DSH_VERSION: ${{ needs.prepare.outputs.version }}
+      TARGET: linux/${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+
+      - name: Install GTK4 and packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build DEB and RPM packages
+        shell: bash
+        run: go run . -target "$TARGET" -dsh-version "$DSH_VERSION" -no-plugins
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: dsh-linux-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: [prepare, macos, windows, linux]
+    name: Publish GitHub Release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      DSH_VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: dsh-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate and publish release
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            "dsh-$DSH_VERSION-darwin-amd64.dmg"
+            "dsh-$DSH_VERSION-darwin-arm64.dmg"
+            "dsh-$DSH_VERSION-windows-amd64-installer.exe"
+            "dsh-$DSH_VERSION-windows-arm64-installer.exe"
+            "dsh-$DSH_VERSION-linux-amd64.deb"
+            "dsh-$DSH_VERSION-linux-amd64.rpm"
+            "dsh-$DSH_VERSION-linux-arm64.deb"
+            "dsh-$DSH_VERSION-linux-arm64.rpm"
+          )
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          diff <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${assets[@]}")
+          (cd release-assets && sha256sum * > SHA256SUMS)
+
+          tag="v$DSH_VERSION"
+          prerelease=false
+          if [[ "$DSH_VERSION" == *-* ]]; then
+            prerelease=true
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/* --clobber
+            gh release edit "$tag" --draft=false --prerelease="$prerelease"
+          else
+            args=(--target "$GITHUB_SHA" --title "$tag" --generate-notes)
+            if [[ "$prerelease" == true ]]; then
+              args+=(--prerelease)
+            fi
+            gh release create "$tag" release-assets/* "${args[@]}"
+          fi

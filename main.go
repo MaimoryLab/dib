@@ -14,12 +14,22 @@ import (
 func main() {
 	configPath := flag.String("config", "dib.yaml", "build configuration")
 	targetName := flag.String("target", "all", "target to build (os/arch or all)")
+	dshVersion := flag.String("dsh-version", "", "override the DSH package version")
+	noPlugins := flag.Bool("no-plugins", false, "exclude configured DSH plugins")
 	dryRun := flag.Bool("dry-run", false, "validate and print targets without building")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if *dshVersion != "" {
+		if err := cfg.SetDSHVersion(*dshVersion); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if *noPlugins {
+		cfg.DSH.Plugins = nil
 	}
 	if *targetName != "all" {
 		cfg.Targets = selectTarget(cfg.Targets, *targetName)
