@@ -1,0 +1,89 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"time"
+
+	webview "github.com/webview/webview_go"
+)
+
+var errServerExited = errors.New("server exited without opening the Web UI")
+
+func run() error {
+	server, url, err := serverCommand()
+	if err != nil {
+		return err
+	}
+	if err := server.Start(); err != nil {
+		return err
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- server.Wait() }()
+	if err := waitReady(url, exited); err != nil {
+		if errors.Is(err, errServerExited) {
+			return nil
+		}
+		_ = server.Process.Kill()
+		return err
+	}
+
+	w := webview.New(false)
+	defer w.Destroy()
+	w.SetTitle("DeepSeek Harness")
+	w.SetSize(1280, 800, webview.HintNone)
+	w.Navigate(url)
+	serverStopped := make(chan struct{})
+	go func() {
+		<-exited
+		close(serverStopped)
+		w.Terminate()
+	}()
+	w.Run()
+
+	select {
+	case <-serverStopped:
+		return nil
+	default:
+	}
+	if err := server.Process.Signal(os.Interrupt); err != nil {
+		_ = server.Process.Kill()
+	}
+	select {
+	case <-serverStopped:
+	case <-time.After(6 * time.Second):
+		_ = server.Process.Kill()
+		<-serverStopped
+	}
+	return nil
+}
+
+func waitReady(url string, exited <-chan error) error {
+	client := &http.Client{Timeout: time.Second}
+	deadline := time.NewTimer(time.Minute)
+	defer deadline.Stop()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-exited:
+			if err == nil {
+				return errServerExited
+			}
+			return err
+		case <-deadline.C:
+			return fmt.Errorf("server did not become ready at %s", url)
+		case <-ticker.C:
+			response, err := client.Get(url)
+			if err != nil {
+				continue
+			}
+			_ = response.Body.Close()
+			if response.StatusCode < 500 {
+				return nil
+			}
+		}
+	}
+}

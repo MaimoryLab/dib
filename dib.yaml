@@ -1,0 +1,33 @@
+version: 1
+output: dist
+cache: .cache
+
+node:
+  version: 22.23.2
+  base_url: https://npmmirror.com/mirrors/node
+
+dsh:
+  package: "@deepseek-ai/dsh"
+  version: 0.1.0-rc.6
+  # Prebuilt npm package specs added here are installed into the runtime.
+  plugins: []
+
+runtime:
+  # gui uses the OS WebView; serve only starts the Web UI server.
+  mode: gui
+  host: 127.0.0.1
+  port: 3080
+
+targets:
+  - os: windows
+    arch: amd64
+  - os: windows
+    arch: arm64
+  - os: darwin
+    arch: amd64
+  - os: darwin
+    arch: arm64
+  - os: linux
+    arch: amd64
+  - os: linux
+    arch: arm64

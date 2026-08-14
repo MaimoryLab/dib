@@ -1,0 +1,43 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+)
+
+var (
+	host       = "127.0.0.1"
+	port       = "3080"
+	dshPackage = "@deepseek-ai/dsh"
+)
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "dshbox:", err)
+		os.Exit(1)
+	}
+}
+
+func serverCommand() (*exec.Cmd, string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, "", err
+	}
+	root := filepath.Dir(executable)
+	node := filepath.Join(root, "runtime", "node", "bin", "node")
+	if runtime.GOOS == "windows" {
+		node = filepath.Join(root, "runtime", "node", "node.exe")
+	}
+	entry := filepath.Join(root, "runtime", "app", "node_modules", filepath.FromSlash(dshPackage), "lib", "bin.js")
+	url := "http://" + host + ":" + port
+	args := []string{entry, "web", "--host", host, "--port", port}
+	args = append(args, os.Args[1:]...)
+	cmd := exec.Command(node, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd, url, nil
+}

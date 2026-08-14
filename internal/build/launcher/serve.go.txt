@@ -1,0 +1,9 @@
+package main
+
+func run() error {
+	cmd, _, err := serverCommand()
+	if err != nil {
+		return err
+	}
+	return cmd.Run()
+}
