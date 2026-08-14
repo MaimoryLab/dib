@@ -58,8 +58,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {arch: amd64, runner: macos-15-intel}
-          - {arch: arm64, runner: macos-15}
+          - {arch: amd64, runner: macos-26-intel}
+          - {arch: arm64, runner: macos-26}
     env:
       CC: clang
       CXX: clang++
@@ -86,7 +86,7 @@ jobs:
 
       - name: Build DMG
         shell: bash
-        run: go run . -target "$TARGET" -dsh-version "$DSH_VERSION" -no-plugins
+        run: go run . -target "$TARGET" -dsh-version "$DSH_VERSION"
 
       - name: Verify DMG
         shell: bash
@@ -190,7 +190,7 @@ jobs:
           Get-Command makensis
 
       - name: Build NSIS installer
-        run: go run . -target "$env:TARGET" -dsh-version "$env:DSH_VERSION" -no-plugins
+        run: go run . -target "$env:TARGET" -dsh-version "$env:DSH_VERSION"
 
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v7
@@ -249,7 +249,7 @@ jobs:
 
       - name: Build DEB and RPM packages
         shell: bash
-        run: go run . -target "$TARGET" -dsh-version "$DSH_VERSION" -no-plugins
+        run: go run . -target "$TARGET" -dsh-version "$DSH_VERSION"
 
       - name: Upload Linux packages
         uses: actions/upload-artifact@v7

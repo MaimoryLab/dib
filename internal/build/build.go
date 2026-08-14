@@ -4,15 +4,18 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"embed"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"io/fs"
 	"net/http"
@@ -24,6 +27,7 @@ import (
 	"time"
 
 	"github.com/MaimoryLab/dib/internal/config"
+	"github.com/tc-hib/winres"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -499,6 +503,11 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return err
 	}
+	if target.OS == "windows" && cfg.Icon != "" {
+		if err := writeWindowsIcon(cfg.Icon, sourceDir, outputDir, target.Arch); err != nil {
+			return err
+		}
+	}
 	output := filepath.Join(outputDir, "dshbox")
 	if target.OS == "windows" {
 		output += ".exe"
@@ -529,12 +538,57 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 	return nil
 }
 
+func writeWindowsIcon(source, sourceDir, outputDir, arch string) error {
+	file, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	image, decodeErr := png.Decode(file)
+	if err := errors.Join(decodeErr, file.Close()); err != nil {
+		return fmt.Errorf("decode Windows icon: %w", err)
+	}
+	icon, err := winres.NewIconFromResizedImage(image, nil)
+	if err != nil {
+		return fmt.Errorf("resize Windows icon: %w", err)
+	}
+	ico, err := os.Create(filepath.Join(outputDir, "icon.ico"))
+	if err != nil {
+		return err
+	}
+	if err := errors.Join(icon.SaveICO(ico), ico.Close()); err != nil {
+		return fmt.Errorf("write Windows icon: %w", err)
+	}
+	resources := winres.ResourceSet{}
+	if err := resources.SetIcon(winres.ID(1), icon); err != nil {
+		return err
+	}
+	object, err := os.Create(filepath.Join(sourceDir, "icon_windows_"+arch+".syso"))
+	if err != nil {
+		return err
+	}
+	if err := errors.Join(resources.WriteObject(object, winres.Arch(arch)), object.Close()); err != nil {
+		return fmt.Errorf("embed Windows icon: %w", err)
+	}
+	return nil
+}
+
 func writeDMG(ctx context.Context, cfg config.Config, name, dmgRoot, appPath string) error {
 	if runtime.GOOS != "darwin" {
 		return errors.New("creating a DMG requires macOS")
 	}
 	if err := writeInfoPlist(cfg, appPath); err != nil {
 		return err
+	}
+	if cfg.Icon != "" {
+		if err := writeICNS(cfg.Icon, filepath.Join(appPath, "Contents", "Resources", "icon.icns")); err != nil {
+			return err
+		}
+		if err := writeICNS(cfg.Icon, filepath.Join(dmgRoot, ".VolumeIcon.icns")); err != nil {
+			return err
+		}
+		if output, err := exec.CommandContext(ctx, "SetFile", "-a", "C", dmgRoot).CombinedOutput(); err != nil {
+			return fmt.Errorf("set DMG volume icon: %w: %s", err, strings.TrimSpace(string(output)))
+		}
 	}
 	if err := os.Symlink("/Applications", filepath.Join(dmgRoot, "Applications")); err != nil {
 		return err
@@ -565,6 +619,10 @@ func writeInfoPlist(cfg config.Config, appPath string) error {
 		_ = xml.EscapeText(&result, []byte(value))
 		return result.String()
 	}
+	icon := ""
+	if cfg.Icon != "" {
+		icon = "  <key>CFBundleIconFile</key><string>icon.icns</string>\n"
+	}
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -574,11 +632,25 @@ func writeInfoPlist(cfg config.Config, appPath string) error {
   <key>CFBundleIdentifier</key><string>%s</string>
   <key>CFBundleName</key><string>%s</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>NSHighResolutionCapable</key><true/>
+%s  <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
-`, escape(cfg.MacOS.AppName), escape(cfg.MacOS.BundleID), escape(cfg.MacOS.AppName))
+`, escape(cfg.MacOS.AppName), escape(cfg.MacOS.BundleID), escape(cfg.MacOS.AppName), icon)
 	return os.WriteFile(filepath.Join(appPath, "Contents", "Info.plist"), []byte(plist), 0o644)
+}
+
+func writeICNS(source, destination string) error {
+	pngData, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	var icon bytes.Buffer
+	icon.WriteString("icns")
+	_ = binary.Write(&icon, binary.BigEndian, uint32(len(pngData)+16))
+	icon.WriteString("ic09")
+	_ = binary.Write(&icon, binary.BigEndian, uint32(len(pngData)+8))
+	icon.Write(pngData)
+	return os.WriteFile(destination, icon.Bytes(), 0o644)
 }
 
 func codesign(ctx context.Context, identity, path string, deep bool) error {
@@ -615,7 +687,11 @@ func writeNSIS(ctx context.Context, cfg config.Config, target config.Target, nam
 		return err
 	}
 	output := filepath.Join(cfg.Output, name+"-installer.exe")
-	cmd := exec.CommandContext(ctx, "makensis", "-WX", "-DPAYLOAD="+root, "-DOUTFILE="+output, scriptPath)
+	args := []string{"-WX", "-DPAYLOAD=" + root, "-DOUTFILE=" + output}
+	if cfg.Icon != "" {
+		args = append(args, "-DICON="+filepath.Join(root, "icon.ico"))
+	}
+	cmd := exec.CommandContext(ctx, "makensis", append(args, scriptPath)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -639,6 +715,10 @@ func nsisScript(cfg config.Config, target config.Target) string {
 	if target.Arch == "arm64" {
 		archCheck = `${IfNot} ${IsNativeARM64}`
 	}
+	icon := ""
+	if cfg.Icon != "" {
+		icon = "Icon \"${ICON}\"\nUninstallIcon \"${ICON}\"\n!define MUI_ICON \"${ICON}\"\n!define MUI_UNICON \"${ICON}\"\n"
+	}
 	return fmt.Sprintf(`Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
@@ -656,6 +736,7 @@ InstallDir "%s"
 RequestExecutionLevel %s
 SetCompressor /SOLID lzma
 ManifestDPIAware true
+%s
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
@@ -690,8 +771,8 @@ Section "Install"
   File /r "${PAYLOAD}\*"
   WriteUninstaller "$INSTDIR\uninstall.exe"
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-  CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\dshbox.exe"
-  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\dshbox.exe"
+  CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\dshbox.exe" "" "$INSTDIR\dshbox.exe" 0
+  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\dshbox.exe" "" "$INSTDIR\dshbox.exe" 0
   WriteRegStr %s "${UNINSTALL_KEY}" "DisplayName" "${PRODUCT}"
   WriteRegStr %s "${UNINSTALL_KEY}" "Publisher" "${PUBLISHER}"
   WriteRegStr %s "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
@@ -708,7 +789,7 @@ Section "Uninstall"
   DeleteRegKey %s "${UNINSTALL_KEY}"
   RMDir /r "$INSTDIR"
 SectionEnd
-`, cfg.Windows.AppName, cfg.Windows.Publisher, cfg.DSH.Version, installDir, requestLevel, archCheck, target.Arch, scope, registry, registry, registry, registry, registry, registry, scope, registry)
+`, cfg.Windows.AppName, cfg.Windows.Publisher, cfg.DSH.Version, installDir, requestLevel, icon, archCheck, target.Arch, scope, registry, registry, registry, registry, registry, registry, scope, registry)
 }
 
 type nfpmConfig struct {
@@ -749,7 +830,11 @@ func writeLinuxPackage(ctx context.Context, cfg config.Config, target config.Tar
 	if cfg.ModeFor(target) == "serve" {
 		terminal = "true"
 	}
-	desktop := fmt.Sprintf("[Desktop Entry]\nVersion=1.0\nName=%s\nExec=/opt/%s/dshbox\nTerminal=%s\nType=Application\nCategories=Development;\n", cfg.Linux.AppName, cfg.Linux.PackageName, terminal)
+	icon := ""
+	if cfg.Icon != "" {
+		icon = "Icon=" + cfg.Linux.PackageName + "\nStartupWMClass=dshbox\n"
+	}
+	desktop := fmt.Sprintf("[Desktop Entry]\nVersion=1.0\nName=%s\nExec=/opt/%s/dshbox\n%sTerminal=%s\nType=Application\nCategories=Development;\n", cfg.Linux.AppName, cfg.Linux.PackageName, icon, terminal)
 	if err := os.WriteFile(desktopPath, []byte(desktop), 0o644); err != nil {
 		return err
 	}
@@ -774,7 +859,7 @@ func writeLinuxPackage(ctx context.Context, cfg config.Config, target config.Tar
 
 func newNFPMConfig(cfg config.Config, target config.Target, root, desktopPath string) nfpmConfig {
 	installRoot := "/opt/" + cfg.Linux.PackageName
-	return nfpmConfig{
+	nfpm := nfpmConfig{
 		Name:        cfg.Linux.PackageName,
 		Arch:        target.Arch,
 		Platform:    "linux",
@@ -795,6 +880,10 @@ func newNFPMConfig(cfg config.Config, target config.Target, root, desktopPath st
 			{Source: desktopPath, Dest: "/usr/share/applications/" + cfg.Linux.PackageName + ".desktop"},
 		},
 	}
+	if cfg.Icon != "" {
+		nfpm.Contents = append(nfpm.Contents, nfpmContent{Source: cfg.Icon, Dest: "/usr/share/icons/hicolor/512x512/apps/" + cfg.Linux.PackageName + ".png"})
+	}
+	return nfpm
 }
 
 func cachedDownload(ctx context.Context, cacheDir, url, sumsURL, filename string) (string, error) {

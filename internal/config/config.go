@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"image"
+	_ "image/png"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +25,7 @@ type Config struct {
 	Version int      `yaml:"version"`
 	Output  string   `yaml:"output"`
 	Cache   string   `yaml:"cache"`
+	Icon    string   `yaml:"icon,omitempty"`
 	Node    Node     `yaml:"node"`
 	DSH     DSH      `yaml:"dsh"`
 	MacOS   MacOS    `yaml:"macos,omitempty"`
@@ -117,6 +120,21 @@ func Load(path string) (Config, error) {
 	}
 	cfg.Output = resolvePath(base, cfg.Output)
 	cfg.Cache = resolvePath(base, cfg.Cache)
+	if cfg.Icon != "" {
+		cfg.Icon = resolvePath(base, cfg.Icon)
+		file, err := os.Open(cfg.Icon)
+		if err != nil {
+			return Config{}, fmt.Errorf("open icon: %w", err)
+		}
+		imageConfig, format, decodeErr := image.DecodeConfig(file)
+		closeErr := file.Close()
+		if err := errors.Join(decodeErr, closeErr); err != nil {
+			return Config{}, fmt.Errorf("read icon: %w", err)
+		}
+		if format != "png" || imageConfig.Width != 512 || imageConfig.Height != 512 {
+			return Config{}, errors.New("icon must be a 512x512 PNG")
+		}
+	}
 	return cfg, nil
 }
 

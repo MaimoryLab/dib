@@ -1,6 +1,8 @@
 package config
 
 import (
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,9 +11,21 @@ import (
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dib.yaml")
+	iconPath := filepath.Join(dir, "icon.png")
+	icon, err := os.Create(iconPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(icon, image.NewNRGBA(image.Rect(0, 0, 512, 512))); err != nil {
+		t.Fatal(err)
+	}
+	if err := icon.Close(); err != nil {
+		t.Fatal(err)
+	}
 	contents := `version: 1
 output: dist
 cache: .cache
+icon: icon.png
 node: {version: 24.19.0}
 dsh: {package: "@deepseek-ai/dsh", version: 0.1.0-rc.6, plugins: []}
 runtime: {mode: gui, host: 127.0.0.1, port: 3080}
@@ -31,6 +45,9 @@ targets:
 	}
 	if cfg.Output != filepath.Join(dir, "dist") {
 		t.Fatalf("output = %q", cfg.Output)
+	}
+	if cfg.Icon != iconPath {
+		t.Fatalf("icon = %q", cfg.Icon)
 	}
 	if cfg.MacOS.Format != "tar.gz" {
 		t.Fatalf("macos format = %q, want tar.gz", cfg.MacOS.Format)

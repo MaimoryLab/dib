@@ -26,6 +26,12 @@ targets:
 
 Each archive contains `dshbox`, Node.js, `@deepseek-ai/dsh`, and packages listed in `dsh.plugins`. npm lifecycle scripts are disabled during packaging; preset plugins should therefore be published as built packages.
 
+Set `icon` to a 512x512 PNG. dib converts it into the Windows executable/installer/shortcut icon, the macOS app and DMG volume icon, and the Linux desktop/taskbar icon.
+
+```yaml
+icon: icon.png
+```
+
 `node.base_url` defaults to `https://nodejs.org/dist`; the example uses npmmirror for networks where nodejs.org is unavailable. The selected source must expose Node's normal `v<version>/SHASUMS256.txt` layout. Node downloads, npm package tarballs, and installed DSH runtimes are reused from `cache`.
 
 ## macOS DMG and signing

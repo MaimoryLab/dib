@@ -89,7 +89,7 @@ static int dsh_tray_init(void *handle) {
 	dsh_tray_data.uID = 1;
 	dsh_tray_data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 	dsh_tray_data.uCallbackMessage = DSH_TRAY_MESSAGE;
-	dsh_tray_data.hIcon = LoadIconW(NULL, IDI_APPLICATION);
+	dsh_tray_data.hIcon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(1));
 	lstrcpynW(dsh_tray_data.szTip, L"DeepSeek Harness", ARRAYSIZE(dsh_tray_data.szTip));
 	dsh_taskbar_created = RegisterWindowMessageW(L"TaskbarCreated");
 	dsh_tray_exiting = 0;

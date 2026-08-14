@@ -3,7 +3,13 @@ package build
 import (
 	"archive/zip"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +18,69 @@ import (
 	"github.com/MaimoryLab/dib/internal/config"
 	"go.yaml.in/yaml/v3"
 )
+
+func TestPlatformIcons(t *testing.T) {
+	work := t.TempDir()
+	source := filepath.Join(work, "icon.png")
+	img := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+	draw.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{R: 8, G: 124, B: 250, A: 255}), image.Point{}, draw.Src)
+	file, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(png.Encode(file, img), file.Close()); err != nil {
+		t.Fatal(err)
+	}
+
+	sourceDir := filepath.Join(work, "source")
+	outputDir := filepath.Join(work, "output")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWindowsIcon(source, sourceDir, outputDir, "amd64"); err != nil {
+		t.Fatal(err)
+	}
+	ico, err := os.ReadFile(filepath.Join(outputDir, "icon.ico"))
+	if err != nil || len(ico) < 6 || binary.LittleEndian.Uint16(ico[2:4]) != 1 {
+		t.Fatalf("invalid ICO: size=%d err=%v", len(ico), err)
+	}
+	object, err := os.ReadFile(filepath.Join(sourceDir, "icon_windows_amd64.syso"))
+	if err != nil || len(object) < 2 || binary.LittleEndian.Uint16(object[:2]) != 0x8664 {
+		t.Fatalf("invalid Windows resource object: size=%d err=%v", len(object), err)
+	}
+
+	icnsPath := filepath.Join(work, "icon.icns")
+	if err := writeICNS(source, icnsPath); err != nil {
+		t.Fatal(err)
+	}
+	icns, err := os.ReadFile(icnsPath)
+	if err != nil || len(icns) < 16 || string(icns[:4]) != "icns" || string(icns[8:12]) != "ic09" || int(binary.BigEndian.Uint32(icns[4:8])) != len(icns) {
+		t.Fatalf("invalid ICNS: size=%d err=%v", len(icns), err)
+	}
+
+	cfg := config.Config{Icon: source, MacOS: config.MacOS{AppName: "DSH", BundleID: "ai.deepseek.dsh"}}
+	appPath := filepath.Join(work, "DSH.app")
+	if err := os.MkdirAll(filepath.Join(appPath, "Contents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeInfoPlist(cfg, appPath); err != nil {
+		t.Fatal(err)
+	}
+	plist, err := os.ReadFile(filepath.Join(appPath, "Contents", "Info.plist"))
+	if err != nil || !strings.Contains(string(plist), "CFBundleIconFile") {
+		t.Fatalf("app plist does not reference its icon: %v", err)
+	}
+	if script := nsisScript(config.Config{Icon: source, Windows: config.Windows{AppName: "DSH", Publisher: "DSH", InstallScope: "user"}}, config.Target{Arch: "amd64"}); !strings.Contains(script, `Icon "${ICON}"`) || !strings.Contains(script, `"$INSTDIR\dshbox.exe" 0`) {
+		t.Fatal("NSIS installer or shortcuts do not reference the icon")
+	}
+	linux := newNFPMConfig(config.Config{Icon: source, DSH: config.DSH{Version: "1.0.0"}, Linux: config.Linux{PackageName: "dsh"}}, config.Target{Arch: "amd64"}, "/tmp/root", "/tmp/dsh.desktop")
+	if got := linux.Contents[len(linux.Contents)-1].Dest; got != "/usr/share/icons/hicolor/512x512/apps/dsh.png" {
+		t.Fatalf("Linux icon destination = %q", got)
+	}
+}
 
 func TestExtractZipRejectsPathTraversal(t *testing.T) {
 	archivePath := filepath.Join(t.TempDir(), "bad.zip")
