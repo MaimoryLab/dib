@@ -36,7 +36,7 @@ var launcherFiles embed.FS
 
 const desktopPluginName = "@maimorylab/dsh-desktop"
 
-const appCacheVersion = "5"
+const appCacheVersion = "6"
 
 func Run(ctx context.Context, cfg config.Config) error {
 	for _, target := range cfg.Targets {
@@ -179,7 +179,7 @@ func installDSH(ctx context.Context, cfg config.Config, target config.Target, ds
 	}
 	cacheDir := filepath.Join(cfg.Cache, "app", cacheKey)
 	add := func(specs []string) error {
-		args := []string{"add", "--dir", dst, "--store-dir", filepath.Join(cfg.Cache, "pnpm"), "--prefer-offline", "--prod", "--ignore-scripts", "--lockfile=false", "--config.node-linker=hoisted", "--config.package-import-method=copy", "--config.minimum-release-age=0", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
+		args := []string{"add", "--dir", dst, "--store-dir", filepath.Join(cfg.Cache, "pnpm"), "--prefer-offline", "--prod", "--ignore-scripts", "--lockfile=false", "--config.node-linker=hoisted", "--config.package-import-method=copy", "--config.virtual-store-dir=" + filepath.Join(cfg.Cache, "pnpm", "virtual-store", cacheKey), "--config.minimum-release-age=0", "--os", npmOS(target.OS), "--cpu", npmArch(target.Arch)}
 		cmd := exec.CommandContext(ctx, "pnpm", append(args, specs...)...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
