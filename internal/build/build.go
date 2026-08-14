@@ -49,14 +49,27 @@ func Run(ctx context.Context, cfg config.Config) error {
 }
 
 func buildTarget(ctx context.Context, cfg config.Config, target config.Target) error {
-	work, err := os.MkdirTemp("", "dib-")
+	tempParent := ""
+	if runtime.GOOS == "windows" && target.OS == "windows" {
+		// Keep deeply nested node_modules below NSIS's MAX_PATH limit.
+		var err error
+		tempParent, err = os.Getwd()
+		if err != nil {
+			return err
+		}
+	}
+	work, err := os.MkdirTemp(tempParent, "dib-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(work)
 
 	name := fmt.Sprintf("dsh-%s-%s-%s", cfg.DSH.Version, target.OS, target.Arch)
-	root := filepath.Join(work, name)
+	rootName := name
+	if target.OS == "windows" && cfg.Windows.Format == "nsis" {
+		rootName = "p"
+	}
+	root := filepath.Join(work, rootName)
 	payloadRoot := root
 	launcherRoot := root
 	appPath := ""
