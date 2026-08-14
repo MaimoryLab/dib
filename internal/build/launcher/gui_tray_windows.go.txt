@@ -1,0 +1,138 @@
+package main
+
+/*
+#cgo windows LDFLAGS: -lshell32 -luser32
+#include <shellapi.h>
+#include <windows.h>
+#include <stdlib.h>
+#include <string.h>
+
+static NOTIFYICONDATAW dsh_tray_data;
+static HWND dsh_tray_window;
+static int dsh_tray_installed;
+
+static void dsh_tray_attach(void *handle) {
+	dsh_tray_window = (HWND)handle;
+}
+
+static HWND dsh_tray_resolve_window(void) {
+	if (dsh_tray_window != NULL) return dsh_tray_window;
+	dsh_tray_window = FindWindowW(NULL, L"DeepSeek Harness");
+	if (dsh_tray_window == NULL) dsh_tray_window = GetForegroundWindow();
+	return dsh_tray_window;
+}
+
+static void dsh_tray_copy_utf8(wchar_t *dst, size_t capacity, const char *src) {
+	if (capacity == 0) return;
+	if (src == NULL) src = "";
+	int written = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, -1, dst, (int)capacity);
+	if (written == 0) dst[0] = L'\0';
+	dst[capacity - 1] = L'\0';
+}
+
+static int dsh_tray_set(const char *title, const char *tooltip) {
+	HWND window = dsh_tray_resolve_window();
+	if (window == NULL) return 0;
+
+	memset(&dsh_tray_data, 0, sizeof(dsh_tray_data));
+	dsh_tray_data.cbSize = sizeof(dsh_tray_data);
+	dsh_tray_data.hWnd = window;
+	dsh_tray_data.uID = 1;
+	dsh_tray_data.uFlags = NIF_ICON | NIF_TIP;
+	dsh_tray_data.hIcon = LoadIconW(NULL, IDI_APPLICATION);
+	dsh_tray_copy_utf8(dsh_tray_data.szTip, sizeof(dsh_tray_data.szTip) / sizeof(dsh_tray_data.szTip[0]),
+		(tooltip != NULL && tooltip[0] != '\0') ? tooltip : title);
+
+	if (dsh_tray_installed) {
+		if (Shell_NotifyIconW(NIM_MODIFY, &dsh_tray_data)) return 1;
+		Shell_NotifyIconW(NIM_DELETE, &dsh_tray_data);
+		dsh_tray_installed = 0;
+	}
+	if (!Shell_NotifyIconW(NIM_ADD, &dsh_tray_data)) return 0;
+	dsh_tray_installed = 1;
+	dsh_tray_data.uVersion = NOTIFYICON_VERSION_4;
+	Shell_NotifyIconW(NIM_SETVERSION, &dsh_tray_data);
+	return 1;
+}
+
+static int dsh_tray_clear(void) {
+	if (!dsh_tray_installed) return 1;
+	int ok = Shell_NotifyIconW(NIM_DELETE, &dsh_tray_data);
+	dsh_tray_installed = 0;
+	memset(&dsh_tray_data, 0, sizeof(dsh_tray_data));
+	return ok != 0;
+}
+
+static int dsh_tray_show(void) {
+	HWND window = dsh_tray_resolve_window();
+	if (window == NULL) return 0;
+	ShowWindow(window, SW_SHOW);
+	SetForegroundWindow(window);
+	return 1;
+}
+
+static int dsh_tray_hide(void) {
+	HWND window = dsh_tray_resolve_window();
+	if (window == NULL) return 0;
+	ShowWindow(window, SW_HIDE);
+	return 1;
+}
+
+static int dsh_tray_terminate(void) {
+	HWND window = dsh_tray_resolve_window();
+	if (window == NULL) return 0;
+	PostMessageW(window, WM_CLOSE, 0, 0);
+	return 1;
+}
+*/
+import "C"
+
+import (
+	"errors"
+	"unsafe"
+)
+
+func nativeTraySupported() bool { return true }
+
+// nativeTrayAttach gives the tray the WebView's top-level HWND when available.
+// The fallback lookup keeps the capability usable before the bridge attaches it.
+func nativeTrayAttach(handle unsafe.Pointer) { C.dsh_tray_attach(handle) }
+
+func nativeTraySet(title, tooltip string) error {
+	titleValue := C.CString(title)
+	tooltipValue := C.CString(tooltip)
+	defer C.free(unsafe.Pointer(titleValue))
+	defer C.free(unsafe.Pointer(tooltipValue))
+	if C.dsh_tray_set(titleValue, tooltipValue) == 0 {
+		return errors.New("create Windows notification-area icon")
+	}
+	return nil
+}
+
+func nativeTrayClear() error {
+	if C.dsh_tray_clear() == 0 {
+		return errors.New("remove Windows notification-area icon")
+	}
+	return nil
+}
+
+func nativeTrayShow() error {
+	if C.dsh_tray_show() == 0 {
+		return errors.New("show dsh window")
+	}
+	return nil
+}
+
+func nativeTrayHide() error {
+	if C.dsh_tray_hide() == 0 {
+		return errors.New("hide dsh window")
+	}
+	return nil
+}
+
+func nativeTrayTerminate() error {
+	if C.dsh_tray_terminate() == 0 {
+		return errors.New("close dsh window")
+	}
+	return nil
+}

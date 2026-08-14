@@ -33,6 +33,29 @@ static DSHMenuTarget *dsh_menu_target;
 static NSMenu *dsh_menu_help;
 static NSMutableDictionary<NSString *, NSMenuItem *> *dsh_menu_items;
 
+static void dsh_menu_add_edit(NSMenu *main) {
+	NSMenuItem *editItem = [main itemWithTitle:@"Edit"];
+	if (editItem != nil) return;
+	editItem = [[NSMenuItem alloc] initWithTitle:@"Edit" action:nil keyEquivalent:@""];
+	NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"];
+	NSArray *items = @[
+		[[NSMenuItem alloc] initWithTitle:@"Undo" action:@selector(undo:) keyEquivalent:@"z"],
+		[[NSMenuItem alloc] initWithTitle:@"Redo" action:@selector(redo:) keyEquivalent:@"Z"],
+		[NSMenuItem separatorItem],
+		[[NSMenuItem alloc] initWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"],
+		[[NSMenuItem alloc] initWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"],
+		[[NSMenuItem alloc] initWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"],
+		[[NSMenuItem alloc] initWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"],
+	];
+	for (NSMenuItem *item in items) {
+		if (item.action == @selector(redo:)) item.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+		else if (item.action != nil) item.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+		[edit addItem:item];
+	}
+	[main addItem:editItem];
+	[main setSubmenu:edit forItem:editItem];
+}
+
 static void dsh_menu_install(void *handle, const char *version) {
 	(void)handle;
 	dsh_menu_target = [DSHMenuTarget new];
@@ -42,6 +65,7 @@ static void dsh_menu_install(void *handle, const char *version) {
 		main = [[NSMenu alloc] initWithTitle:@"Main Menu"];
 		[NSApp setMainMenu:main];
 	}
+	dsh_menu_add_edit(main);
 	NSMenuItem *helpItem = [[NSMenuItem alloc] initWithTitle:@"Help" action:nil keyEquivalent:@""];
 	NSMenu *help = [[NSMenu alloc] initWithTitle:@"Help"];
 	dsh_menu_help = help;
@@ -92,9 +116,6 @@ func installNativeMenu(handle unsafe.Pointer, version string) {
 	defer C.free(unsafe.Pointer(value))
 	C.dsh_menu_install(handle, value)
 }
-
-//export dshMenuAction
-func dshMenuAction(id *C.char) { nativeMenuAction(C.GoString(id)) }
 
 func nativeMenuRegister(id, label, parent string, order int) error {
 	idValue := C.CString(id)

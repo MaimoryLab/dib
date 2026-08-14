@@ -1,0 +1,92 @@
+package main
+
+/*
+#cgo windows LDFLAGS: -lcomdlg32 -lshell32
+#include <commdlg.h>
+#include <shellapi.h>
+#include <stdlib.h>
+#include <windows.h>
+
+static int dsh_choose_files(int multiple, wchar_t *buffer, DWORD size, DWORD *error) {
+	OPENFILENAMEW dialog = {0};
+	dialog.lStructSize = sizeof(dialog);
+	dialog.lpstrFile = buffer;
+	dialog.nMaxFile = size;
+	dialog.lpstrFilter = L"All files\0*.*\0\0";
+	dialog.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+	if (multiple) dialog.Flags |= OFN_ALLOWMULTISELECT;
+	if (GetOpenFileNameW(&dialog)) return 1;
+	*error = CommDlgExtendedError();
+	return *error == 0 ? 0 : -1;
+}
+
+static int dsh_open_external(const char *url) {
+	int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, url, -1, NULL, 0);
+	if (size == 0) return -1;
+	wchar_t *value = (wchar_t *)calloc((size_t)size, sizeof(wchar_t));
+	if (value == NULL) return -1;
+	MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, url, -1, value, size);
+	HINSTANCE result = ShellExecuteW(NULL, L"open", value, NULL, NULL, SW_SHOWNORMAL);
+	free(value);
+	return (INT_PTR)result > 32 ? 0 : (int)(INT_PTR)result;
+}
+*/
+import "C"
+
+import (
+	"fmt"
+	"path/filepath"
+	"unicode/utf16"
+	"unsafe"
+)
+
+func nativeChooseFiles(multiple bool) ([]string, error) {
+	buffer := make([]C.wchar_t, 65536)
+	var code C.DWORD
+	result := C.dsh_choose_files(C.int(boolInt(multiple)), &buffer[0], C.DWORD(len(buffer)), &code)
+	if result == 0 {
+		return []string{}, nil
+	}
+	if result < 0 {
+		return nil, fmt.Errorf("open file dialog failed: %d", uint32(code))
+	}
+	fields := decodeWindowsFileBuffer(buffer)
+	if len(fields) < 2 {
+		return fields, nil
+	}
+	paths := make([]string, 0, len(fields)-1)
+	for _, name := range fields[1:] {
+		paths = append(paths, filepath.Join(fields[0], name))
+	}
+	return paths, nil
+}
+
+func decodeWindowsFileBuffer(buffer []C.wchar_t) []string {
+	var fields []string
+	for start := 0; start < len(buffer) && buffer[start] != 0; {
+		end := start
+		for end < len(buffer) && buffer[end] != 0 {
+			end++
+		}
+		value := make([]uint16, end-start)
+		for i := range value {
+			value[i] = uint16(buffer[start+i])
+		}
+		fields = append(fields, string(utf16.Decode(value)))
+		start = end + 1
+	}
+	return fields
+}
+
+func nativeOpenExternal(raw string) error {
+	value, err := validateExternalURL(raw)
+	if err != nil {
+		return err
+	}
+	cURL := C.CString(value)
+	defer C.free(unsafe.Pointer(cURL))
+	if code := int(C.dsh_open_external(cURL)); code != 0 {
+		return fmt.Errorf("open external URL failed: %d", code)
+	}
+	return nil
+}

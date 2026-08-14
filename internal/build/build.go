@@ -151,10 +151,14 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 		if target.OS == "linux" {
 			backend = "gui_linux.go.txt"
 		}
-		files = append(files, backend)
-		if target.OS == "windows" || target.OS == "darwin" {
-			files = append(files, "gui_menu_"+target.OS+".go.txt")
+		files = append(files, backend, "gui_files.go.txt", "gui_files_"+target.OS+".go.txt", "gui_notify_"+target.OS+".go.txt")
+		if target.OS == "linux" {
+			files = append(files, "gui_files_linux_action.go.txt", "gui_notify_linux_action.go.txt")
 		}
+		if target.OS == "windows" || target.OS == "darwin" {
+			files = append(files, "gui_menu_"+target.OS+".go.txt", "gui_menu_action.go.txt")
+		}
+		files = append(files, "gui_tray_"+target.OS+".go.txt")
 	}
 	for _, name := range files {
 		data, err := launcherFiles.ReadFile("launcher/" + name)

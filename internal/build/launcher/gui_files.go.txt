@@ -1,0 +1,69 @@
+package main
+
+import (
+	"fmt"
+	"net/url"
+	"strings"
+)
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+const droppedFilesScript = `
+(() => {
+  window.dshboxFilesDrop = true
+  const isAbsolute = value => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value)
+  const fromFile = file => typeof file.path === 'string' && isAbsolute(file.path) ? file.path : ''
+  const fromURI = value => {
+    try {
+      const uri = new URL(value)
+      if (uri.protocol !== 'file:') return ''
+      if (uri.hostname && uri.hostname !== 'localhost') return ''
+      let path = decodeURIComponent(uri.pathname)
+      if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1).replaceAll('/', '\\')
+      return isAbsolute(path) ? path : ''
+    } catch {
+      return ''
+    }
+  }
+  const acceptsFiles = event => {
+    const types = Array.from(event.dataTransfer?.types ?? [])
+    return types.includes('Files') || types.includes('text/uri-list')
+  }
+  window.addEventListener('dragover', event => {
+    if (!acceptsFiles(event)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }, true)
+  window.addEventListener('drop', event => {
+    if (!acceptsFiles(event)) return
+    event.preventDefault()
+    const paths = Array.from(event.dataTransfer.files ?? [], fromFile).filter(Boolean)
+    const uriList = event.dataTransfer.getData('text/uri-list')
+    paths.push(...uriList.split(/\r?\n/).filter(line => line && !line.startsWith('#')).map(fromURI).filter(Boolean))
+    const unique = [...new Set(paths)]
+    if (unique.length) window.dispatchEvent(new CustomEvent('dshbox:files-dropped', { detail: unique }))
+  }, true)
+})()
+`
+
+func validateExternalURL(raw string) (string, error) {
+	value, err := url.ParseRequestURI(raw)
+	if err != nil || !value.IsAbs() {
+		return "", fmt.Errorf("invalid external URL %q", raw)
+	}
+	switch strings.ToLower(value.Scheme) {
+	case "http", "https":
+		if value.Host == "" {
+			return "", fmt.Errorf("invalid external URL %q", raw)
+		}
+	case "mailto":
+	default:
+		return "", fmt.Errorf("external URL scheme %q is not allowed", value.Scheme)
+	}
+	return value.String(), nil
+}

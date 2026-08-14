@@ -16,7 +16,7 @@ static WNDPROC dsh_menu_previous_proc;
 static HMENU dsh_menu_handle;
 static HMENU dsh_menu_help;
 static wchar_t dsh_menu_version[128];
-static struct { UINT command; char id[128]; } dsh_menu_items[128];
+static struct { UINT command; HMENU menu; char id[128]; } dsh_menu_items[128];
 static int dsh_menu_item_count;
 
 static LRESULT CALLBACK dsh_menu_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -51,6 +51,7 @@ static int dsh_menu_add(const char *id, const char *label, const char *parent, i
 	AppendMenuW(menu, MF_STRING, command, wide);
 	free(wide);
 	dsh_menu_items[dsh_menu_item_count].command = command;
+	dsh_menu_items[dsh_menu_item_count].menu = menu;
 	strncpy_s(dsh_menu_items[dsh_menu_item_count].id, 128, id, _TRUNCATE);
 	dsh_menu_item_count++;
 	DrawMenuBar(dsh_menu_window);
@@ -60,7 +61,7 @@ static int dsh_menu_add(const char *id, const char *label, const char *parent, i
 static int dsh_menu_remove(const char *id) {
 	for (int i = 0; i < dsh_menu_item_count; i++) {
 		if (strcmp(dsh_menu_items[i].id, id) == 0) {
-			DeleteMenu(dsh_menu_help, dsh_menu_items[i].command, MF_BYCOMMAND);
+			DeleteMenu(dsh_menu_items[i].menu, dsh_menu_items[i].command, MF_BYCOMMAND);
 			for (int j = i + 1; j < dsh_menu_item_count; j++) dsh_menu_items[j - 1] = dsh_menu_items[j];
 			dsh_menu_item_count--;
 			DrawMenuBar(dsh_menu_window);
@@ -99,9 +100,6 @@ func installNativeMenu(handle unsafe.Pointer, version string) {
 	defer C.free(unsafe.Pointer(value))
 	C.dsh_menu_install(handle, value)
 }
-
-//export dshMenuAction
-func dshMenuAction(id *C.char) { nativeMenuAction(C.GoString(id)) }
 
 func nativeMenuRegister(id, label, parent string, order int) error {
 	idValue := C.CString(id)

@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"unicode"
 
 	webview "github.com/webview/webview_go"
 )
@@ -19,6 +21,16 @@ type menuItem struct {
 	Order  int    `json:"order"`
 }
 
+type notificationRequest struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+type trayRequest struct {
+	Title   string `json:"title"`
+	Tooltip string `json:"tooltip"`
+}
+
 var activeMenuWindow struct {
 	sync.Mutex
 	w webview.WebView
@@ -31,18 +43,73 @@ func newGUIWindow(url string) (*guiWindow, error) {
 	}
 	w.SetTitle("DeepSeek Harness")
 	w.SetSize(1280, 800, webview.HintNone)
+	w.Init(droppedFilesScript)
 	w.Navigate(url)
+	nativeTrayAttach(w.Window())
+	if err := w.Bind("dshboxNotify", func(request notificationRequest) error {
+		if strings.TrimSpace(request.Title) == "" || strings.TrimSpace(request.Body) == "" {
+			return errors.New("notification title and body are required")
+		}
+		if len(request.Title) > 256 || len(request.Body) > 4096 {
+			return errors.New("notification exceeds size limit")
+		}
+		return nativeNotify(request.Title, request.Body)
+	}); err != nil {
+		w.Destroy()
+		return nil, fmt.Errorf("bind notifications: %w", err)
+	}
+	if err := w.Bind("dshboxTraySet", func(request trayRequest) error {
+		if len(request.Title) > 128 || len(request.Tooltip) > 256 || strings.IndexByte(request.Title, 0) >= 0 || strings.IndexByte(request.Tooltip, 0) >= 0 {
+			return errors.New("tray text exceeds size limit")
+		}
+		return nativeTraySet(request.Title, request.Tooltip)
+	}); err != nil {
+		w.Destroy()
+		return nil, fmt.Errorf("bind tray icon: %w", err)
+	}
+	for name, action := range map[string]func() error{
+		"dshboxTrayClear": nativeTrayClear,
+		"dshboxTrayShow":  nativeTrayShow,
+		"dshboxTrayHide":  nativeTrayHide,
+		"dshboxTrayQuit":  nativeTrayTerminate,
+	} {
+		if err := w.Bind(name, action); err != nil {
+			w.Destroy()
+			return nil, fmt.Errorf("bind tray action %s: %w", name, err)
+		}
+	}
+	if err := w.Bind("dshboxChooseFiles", nativeChooseFiles); err != nil {
+		w.Destroy()
+		return nil, fmt.Errorf("bind file selection: %w", err)
+	}
+	if err := w.Bind("dshboxOpenExternal", nativeOpenExternal); err != nil {
+		w.Destroy()
+		return nil, fmt.Errorf("bind external URL opener: %w", err)
+	}
 	installNativeMenu(w.Window(), dshVersion)
 	activeMenuWindow.Lock()
 	activeMenuWindow.w = w
 	activeMenuWindow.Unlock()
 	if err := w.Bind("dshboxMenuRegister", func(item menuItem) error {
+		item.ID = strings.TrimSpace(item.ID)
+		item.Label = strings.TrimSpace(item.Label)
+		item.Parent = strings.TrimSpace(item.Parent)
+		validText := func(value string, limit int) bool {
+			return value != "" && len(value) <= limit && strings.IndexFunc(value, unicode.IsControl) < 0
+		}
+		if !validText(item.ID, 127) || !validText(item.Label, 256) || len(item.Parent) > 64 || strings.IndexFunc(item.Parent, unicode.IsControl) >= 0 || item.Order < -2147483648 || item.Order > 2147483647 {
+			return errors.New("invalid menu item")
+		}
 		return nativeMenuRegister(item.ID, item.Label, item.Parent, item.Order)
 	}); err != nil {
 		w.Destroy()
 		return nil, fmt.Errorf("bind menu registration: %w", err)
 	}
 	if err := w.Bind("dshboxMenuUnregister", func(id string) error {
+		id = strings.TrimSpace(id)
+		if id == "" || len(id) > 127 || strings.IndexFunc(id, unicode.IsControl) >= 0 {
+			return errors.New("invalid menu id")
+		}
 		return nativeMenuUnregister(id)
 	}); err != nil {
 		w.Destroy()
@@ -54,6 +121,7 @@ func newGUIWindow(url string) (*guiWindow, error) {
 func (w *guiWindow) run()       { w.Run() }
 func (w *guiWindow) terminate() { w.Terminate() }
 func (w *guiWindow) destroy() {
+	_ = nativeTrayClear()
 	uninstallNativeMenu(w.Window())
 	activeMenuWindow.Lock()
 	activeMenuWindow.w = nil

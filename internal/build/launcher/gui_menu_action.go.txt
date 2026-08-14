@@ -1,0 +1,9 @@
+package main
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+//export dshMenuAction
+func dshMenuAction(id *C.char) { nativeMenuAction(C.GoString(id)) }

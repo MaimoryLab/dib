@@ -1,0 +1,109 @@
+package main
+
+/*
+#cgo darwin CFLAGS: -x objective-c
+#cgo darwin LDFLAGS: -framework Cocoa
+#import <Cocoa/Cocoa.h>
+#include <stdlib.h>
+
+static NSStatusItem *dsh_tray_item;
+
+static int dsh_tray_set(const char *title, const char *tooltip) {
+	NSStatusBar *bar = [NSStatusBar systemStatusBar];
+	if (bar == nil) return 0;
+	if (dsh_tray_item == nil) {
+		dsh_tray_item = [bar statusItemWithLength:NSVariableStatusItemLength];
+	}
+	NSButton *button = dsh_tray_item.button;
+	NSString *buttonTitle = title == NULL ? @"" : [NSString stringWithUTF8String:title];
+	NSString *buttonTooltip = tooltip == NULL ? @"" : [NSString stringWithUTF8String:tooltip];
+	button.title = buttonTitle ?: @"";
+	button.toolTip = buttonTooltip ?: @"";
+	NSImage *icon = [[NSApp applicationIconImage] copy];
+	if (icon != nil) {
+		icon.template = YES;
+		button.image = icon;
+		[icon release];
+	}
+	return 1;
+}
+
+static int dsh_tray_clear(void) {
+	if (dsh_tray_item == nil) return 1;
+	[[NSStatusBar systemStatusBar] removeStatusItem:dsh_tray_item];
+	dsh_tray_item = nil;
+	return 1;
+}
+
+static int dsh_tray_show(void) {
+	[NSApp unhide:nil];
+	[NSApp activateIgnoringOtherApps:YES];
+	return 1;
+}
+
+static int dsh_tray_hide(void) {
+	[NSApp hide:nil];
+	return 1;
+}
+
+static int dsh_tray_terminate(void) {
+	NSWindow *window = [NSApp mainWindow];
+	if (window == nil) window = [[NSApp windows] firstObject];
+	if (window == nil) return 0;
+	[window performClose:nil];
+	return 1;
+}
+
+static void dsh_tray_attach(void *handle) {
+	(void)handle;
+}
+*/
+import "C"
+
+import (
+	"errors"
+	"unsafe"
+)
+
+func nativeTraySupported() bool { return true }
+
+func nativeTrayAttach(handle unsafe.Pointer) { C.dsh_tray_attach(handle) }
+
+func nativeTraySet(title, tooltip string) error {
+	titleValue := C.CString(title)
+	tooltipValue := C.CString(tooltip)
+	defer C.free(unsafe.Pointer(titleValue))
+	defer C.free(unsafe.Pointer(tooltipValue))
+	if C.dsh_tray_set(titleValue, tooltipValue) == 0 {
+		return errors.New("create macOS menu-bar icon")
+	}
+	return nil
+}
+
+func nativeTrayClear() error {
+	if C.dsh_tray_clear() == 0 {
+		return errors.New("remove macOS menu-bar icon")
+	}
+	return nil
+}
+
+func nativeTrayShow() error {
+	if C.dsh_tray_show() == 0 {
+		return errors.New("show dsh window")
+	}
+	return nil
+}
+
+func nativeTrayHide() error {
+	if C.dsh_tray_hide() == 0 {
+		return errors.New("hide dsh window")
+	}
+	return nil
+}
+
+func nativeTrayTerminate() error {
+	if C.dsh_tray_terminate() == 0 {
+		return errors.New("close dsh window")
+	}
+	return nil
+}

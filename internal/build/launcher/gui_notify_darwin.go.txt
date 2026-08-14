@@ -1,0 +1,20 @@
+package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func nativeNotify(title, body string) error {
+	cmd := exec.Command(
+		"/usr/bin/osascript",
+		"-e", "on run argv",
+		"-e", "display notification (item 2 of argv) with title (item 1 of argv)",
+		"-e", "end run",
+		"--", title, body,
+	)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("show macOS notification: %w", err)
+	}
+	return nil
+}

@@ -1,0 +1,12 @@
+package main
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+//export dshLinuxOpenExternal
+func dshLinuxOpenExternal(raw *C.char) {
+	// ponytail: WebKitGTK's one-way handler cannot return launch errors; use a reply handler if callers need confirmation.
+	_ = nativeOpenExternal(C.GoString(raw))
+}

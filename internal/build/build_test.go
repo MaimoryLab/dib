@@ -154,3 +154,63 @@ func TestLinuxGUILauncherUsesGTK4(t *testing.T) {
 		}
 	}
 }
+
+func TestLinuxGUILauncherAllowsClipboard(t *testing.T) {
+	source, err := launcherFiles.ReadFile("launcher/gui_linux.go.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	if !strings.Contains(text, "webkit_settings_set_javascript_can_access_clipboard(settings, TRUE)") {
+		t.Fatal("Linux GUI launcher does not enable WebKit clipboard access")
+	}
+}
+
+func TestDarwinGUILauncherHasEditMenu(t *testing.T) {
+	source, err := launcherFiles.ReadFile("launcher/gui_menu_darwin.go.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, want := range []string{"dsh_menu_add_edit", "@selector(copy:)", "@selector(paste:)"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("macOS GUI launcher does not provide %q", want)
+		}
+	}
+}
+
+func TestGUIFileCapabilitySources(t *testing.T) {
+	common, err := launcherFiles.ReadFile("launcher/gui_files.go.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"dshbox:files-dropped", "text/uri-list", "validateExternalURL"} {
+		if !strings.Contains(string(common), want) {
+			t.Fatalf("file capability source does not contain %q", want)
+		}
+	}
+	for _, target := range []string{"windows", "darwin", "linux"} {
+		source, err := launcherFiles.ReadFile("launcher/gui_files_" + target + ".go.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"nativeChooseFiles", "nativeOpenExternal"} {
+			if !strings.Contains(string(source), want) {
+				t.Fatalf("%s file capability source does not contain %q", target, want)
+			}
+		}
+	}
+}
+
+func TestLinuxOptionalDesktopBridges(t *testing.T) {
+	source, err := launcherFiles.ReadFile("launcher/gui_linux.go.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, want := range []string{"LookPath(\"xdg-open\")", "LookPath(\"notify-send\")", "dshboxOpenExternal", "dshboxNotify"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("Linux GUI launcher does not contain %q", want)
+		}
+	}
+}

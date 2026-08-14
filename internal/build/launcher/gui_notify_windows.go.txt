@@ -1,0 +1,42 @@
+package main
+
+import (
+	"encoding/base64"
+	"fmt"
+	"os"
+	"os/exec"
+	"syscall"
+)
+
+const windowsNotificationScript = `$ErrorActionPreference = 'Stop'
+$title = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:DSHBOX_NOTIFICATION_TITLE_B64))
+$body = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:DSHBOX_NOTIFICATION_BODY_B64))
+$title = [Security.SecurityElement]::Escape($title)
+$body = [Security.SecurityElement]::Escape($body)
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.UI.Notifications.ToastNotification, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml(('<toast><visual><binding template="ToastGeneric"><text>{0}</text><text>{1}</text></binding></visual></toast>' -f $title, $body))
+$toast = New-Object Windows.UI.Notifications.ToastNotification $xml
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('DeepSeek Harness').Show($toast)`
+
+func nativeNotify(title, body string) error {
+	cmd := exec.Command(
+		"powershell.exe",
+		"-NoLogo",
+		"-NoProfile",
+		"-NonInteractive",
+		"-WindowStyle", "Hidden",
+		"-Command", windowsNotificationScript,
+	)
+	cmd.Env = append(os.Environ(),
+		"DSHBOX_NOTIFICATION_TITLE_B64="+base64.StdEncoding.EncodeToString([]byte(title)),
+		"DSHBOX_NOTIFICATION_BODY_B64="+base64.StdEncoding.EncodeToString([]byte(body)),
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("show Windows notification: %w", err)
+	}
+	return nil
+}

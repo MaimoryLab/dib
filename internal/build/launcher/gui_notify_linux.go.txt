@@ -1,0 +1,17 @@
+package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func nativeNotify(title, body string) error {
+	notifySend, err := exec.LookPath("notify-send")
+	if err != nil {
+		return fmt.Errorf("system notifications unavailable: notify-send not found: %w", err)
+	}
+	if err := exec.Command(notifySend, "--app-name=DeepSeek Harness", "--", title, body).Run(); err != nil {
+		return fmt.Errorf("show Linux notification: %w", err)
+	}
+	return nil
+}

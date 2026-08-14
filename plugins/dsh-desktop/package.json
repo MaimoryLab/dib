@@ -1,12 +1,19 @@
 {
   "name": "@maimorylab/dsh-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness desktop UI extensions",
   "type": "module",
   "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "exports": {
-    ".": "./lib/index.js",
-    "./client": "./lib/client.js",
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
+    },
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -19,5 +26,8 @@
       ]
     }
   },
-  "files": ["lib/index.js", "lib/client.js", "README.md"]
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  },
+  "files": ["lib/index.js", "lib/index.d.ts", "lib/client.js", "lib/client.d.ts", "README.md"]
 }

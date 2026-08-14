@@ -1,0 +1,85 @@
+package main
+
+/*
+#cgo darwin CFLAGS: -x objective-c
+#cgo darwin LDFLAGS: -framework Cocoa
+#import <Cocoa/Cocoa.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int dsh_choose_files(int multiple, char *buffer, size_t size) {
+	@autoreleasepool {
+		NSOpenPanel *dialog = [NSOpenPanel openPanel];
+		[dialog setCanChooseFiles:YES];
+		[dialog setCanChooseDirectories:NO];
+		[dialog setAllowsMultipleSelection:multiple ? YES : NO];
+		[dialog setResolvesAliases:YES];
+		if ([dialog runModal] != NSModalResponseOK) return 0;
+		size_t offset = 0;
+		for (NSURL *url in [dialog URLs]) {
+			const char *path = [[url path] fileSystemRepresentation];
+			size_t length = strlen(path) + 1;
+			if (offset + length >= size) return -1;
+			memcpy(buffer + offset, path, length);
+			offset += length;
+		}
+		buffer[offset] = '\0';
+		return 1;
+	}
+}
+
+static int dsh_open_external(const char *url) {
+	@autoreleasepool {
+		NSString *value = [NSString stringWithUTF8String:url];
+		if (value == nil) return 0;
+		return [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:value]] ? 1 : 0;
+	}
+}
+*/
+import "C"
+
+import (
+	"errors"
+	"unsafe"
+)
+
+func nativeChooseFiles(multiple bool) ([]string, error) {
+	buffer := make([]C.char, 65536)
+	result := C.dsh_choose_files(C.int(boolInt(multiple)), &buffer[0], C.size_t(len(buffer)))
+	if result == 0 {
+		return []string{}, nil
+	}
+	if result < 0 {
+		return nil, errors.New("selected file paths exceed 64 KiB")
+	}
+	var paths []string
+	for start := 0; start < len(buffer) && buffer[start] != 0; {
+		end := start
+		for end < len(buffer) && buffer[end] != 0 {
+			end++
+		}
+		value := make([]byte, end-start)
+		for i := range value {
+			value[i] = byte(buffer[start+i])
+		}
+		paths = append(paths, string(value))
+		start = end + 1
+	}
+	if len(paths) == 0 {
+		return nil, errors.New("file dialog returned no paths")
+	}
+	return paths, nil
+}
+
+func nativeOpenExternal(raw string) error {
+	value, err := validateExternalURL(raw)
+	if err != nil {
+		return err
+	}
+	cURL := C.CString(value)
+	defer C.free(unsafe.Pointer(cURL))
+	if C.dsh_open_external(cURL) == 0 {
+		return errors.New("open external URL failed")
+	}
+	return nil
+}

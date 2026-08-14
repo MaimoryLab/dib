@@ -7,6 +7,9 @@ package main
 #include <gtk/gtk.h>
 #include <webkit/webkit.h>
 
+extern void dshLinuxOpenExternal(char *url);
+extern void dshLinuxNotify(char *request);
+
 typedef struct {
 	GtkWidget *window;
 	gint stopped;
@@ -23,13 +26,37 @@ static gboolean dsh_close_window(GtkWindow *window, gpointer data) {
 	return TRUE;
 }
 
-static DSHWindow *dsh_window_new(const char *title, const char *url) {
+static void dsh_open_external_message(WebKitUserContentManager *manager, JSCValue *value, gpointer data) {
+	(void)manager;
+	(void)data;
+	if (!jsc_value_is_string(value)) return;
+	char *url = jsc_value_to_string(value);
+	if (url == NULL) return;
+	dshLinuxOpenExternal(url);
+	g_free(url);
+}
+
+static void dsh_notify_message(WebKitUserContentManager *manager, JSCValue *value, gpointer data) {
+	(void)manager;
+	(void)data;
+	if (!jsc_value_is_string(value)) return;
+	char *request = jsc_value_to_string(value);
+	if (request == NULL) return;
+	dshLinuxNotify(request);
+	g_free(request);
+}
+
+static DSHWindow *dsh_window_new(const char *title, const char *url, const char *files_script, const char *bridge_script) {
 	if (!gtk_init_check()) {
 		return NULL;
 	}
 	DSHWindow *window = g_new0(DSHWindow, 1);
 	window->window = gtk_window_new();
 	WebKitUserContentManager *manager = webkit_user_content_manager_new();
+	g_signal_connect(manager, "script-message-received::dshboxOpenExternal", G_CALLBACK(dsh_open_external_message), NULL);
+	webkit_user_content_manager_register_script_message_handler(manager, "dshboxOpenExternal", NULL);
+	g_signal_connect(manager, "script-message-received::dshboxNotify", G_CALLBACK(dsh_notify_message), NULL);
+	webkit_user_content_manager_register_script_message_handler(manager, "dshboxNotify", NULL);
 	WebKitUserScript *script = webkit_user_script_new(
 		"(() => { const items = new Map(); let root; const redraw = () => {\n"
 		"if (!document.body) return; if (!root) { root = document.createElement('nav'); root.id = 'dshbox-menu'; root.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;display:flex;background:#202124;color:#fff;font:14px sans-serif'; document.body.prepend(root); }\n"
@@ -37,11 +64,32 @@ static DSHWindow *dsh_window_new(const char *title, const char *url) {
 		"window.dshboxMenuRegister = item => { items.set(item.id,item); redraw(); }; window.dshboxMenuUnregister = id => { items.delete(id); redraw(); }; })()",
 		WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
 		WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+		NULL,
 		NULL);
 	webkit_user_content_manager_add_script(manager, script);
 	webkit_user_script_unref(script);
+	WebKitUserScript *files = webkit_user_script_new(
+		files_script,
+		WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
+		WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+		NULL,
+		NULL);
+	webkit_user_content_manager_add_script(manager, files);
+	webkit_user_script_unref(files);
+	if (bridge_script != NULL && bridge_script[0] != '\0') {
+		WebKitUserScript *bridges = webkit_user_script_new(
+			bridge_script,
+			WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
+			WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+			NULL,
+			NULL);
+		webkit_user_content_manager_add_script(manager, bridges);
+		webkit_user_script_unref(bridges);
+	}
 	GtkWidget *webview = webkit_web_view_new_with_user_content_manager(manager);
 	g_object_unref(manager);
+	WebKitSettings *settings = webkit_web_view_get_settings(WEBKIT_WEB_VIEW(webview));
+	webkit_settings_set_javascript_can_access_clipboard(settings, TRUE);
 	gtk_window_set_title(GTK_WINDOW(window->window), title);
 	gtk_window_set_default_size(GTK_WINDOW(window->window), 1280, 800);
 	gtk_window_set_child(GTK_WINDOW(window->window), webview);
@@ -70,7 +118,9 @@ import "C"
 
 import (
 	"errors"
+	"os/exec"
 	"runtime"
+	"strings"
 	"unsafe"
 )
 
@@ -78,13 +128,29 @@ type guiWindow struct {
 	window *C.DSHWindow
 }
 
+func linuxBridgeScript() string {
+	var scripts []string
+	if _, err := exec.LookPath("xdg-open"); err == nil {
+		scripts = append(scripts, "window.dshboxOpenExternal = async url => window.webkit.messageHandlers.dshboxOpenExternal.postMessage(url);")
+	}
+	if _, err := exec.LookPath("notify-send"); err == nil {
+		scripts = append(scripts, "window.dshboxNotify = async request => window.webkit.messageHandlers.dshboxNotify.postMessage(JSON.stringify(request));")
+	}
+	return strings.Join(scripts, "\n")
+}
+
 func newGUIWindow(url string) (*guiWindow, error) {
+	bridgeScript := linuxBridgeScript()
 	runtime.LockOSThread()
 	titleCString := C.CString("DeepSeek Harness")
 	urlCString := C.CString(url)
+	filesScriptCString := C.CString(droppedFilesScript)
+	bridgeScriptCString := C.CString(bridgeScript)
 	defer C.free(unsafe.Pointer(titleCString))
 	defer C.free(unsafe.Pointer(urlCString))
-	window := C.dsh_window_new(titleCString, urlCString)
+	defer C.free(unsafe.Pointer(filesScriptCString))
+	defer C.free(unsafe.Pointer(bridgeScriptCString))
+	window := C.dsh_window_new(titleCString, urlCString, filesScriptCString, bridgeScriptCString)
 	if window == nil {
 		runtime.UnlockOSThread()
 		return nil, errors.New("initialize GTK4 display")
