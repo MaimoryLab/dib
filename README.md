@@ -6,7 +6,7 @@ DSH-in-Box packages DeepSeek Harness with a private Node.js runtime and a small 
 
 ## Build
 
-Requirements: Go, npm, and network access. GUI launchers also require a C/C++ toolchain for the target. Linux requires the GTK 3 and WebKitGTK 4.0 development packages while building, and their runtime libraries on the destination machine.
+Requirements: Go, npm, and network access. GUI launchers also require a C/C++ toolchain for the target. Linux requires the GTK 4 and WebKitGTK 6.0 development packages while building, and their runtime libraries on the destination machine.
 
 ```sh
 go run . -dry-run
@@ -50,3 +50,39 @@ macos:
     enabled: true
     identity: "Developer ID Application: Example Corp (TEAMID)"
 ```
+
+## Windows NSIS
+
+`windows.format: nsis` creates a compressed installer with user or machine scope, architecture and Windows version checks, shortcuts, and an uninstaller. It requires `makensis`; use `zip` to keep the portable archive.
+
+Install the packager with `brew install nsis` on macOS or `apt install nsis` on Debian/Ubuntu build hosts.
+
+```yaml
+windows:
+  format: nsis
+  app_name: DeepSeek Harness
+  publisher: DeepSeek AI
+  install_scope: user
+```
+
+The installer uses the system WebView2 runtime and does not bundle a browser engine.
+
+## Linux packages
+
+Linux can emit either or both nFPM-backed formats. The packages install the runtime under `/opt/dsh`, link `dshbox` into `/usr/bin`, and add a desktop entry. Building requires the `nfpm` command.
+
+```sh
+go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+```
+
+```yaml
+linux:
+  formats: [deb, rpm]
+  package_name: dsh
+  maintainer: DeepSeek Harness <noreply@deepseek.com>
+  depends:
+    deb: [libgtk-4-1, libwebkitgtk-6.0-4]
+    rpm: [gtk4, webkitgtk6.0]
+```
+
+Dependency package names vary between distributions; set both lists for the distributions you publish to.

@@ -35,6 +35,12 @@ targets:
 	if cfg.MacOS.Format != "tar.gz" {
 		t.Fatalf("macos format = %q, want tar.gz", cfg.MacOS.Format)
 	}
+	if cfg.Windows.Format != "zip" || len(cfg.Linux.Formats) != 1 || cfg.Linux.Formats[0] != "tar.gz" {
+		t.Fatalf("unexpected package defaults: windows=%q linux=%v", cfg.Windows.Format, cfg.Linux.Formats)
+	}
+	if cfg.Linux.Depends.Deb[0] != "libgtk-4-1" || cfg.Linux.Depends.RPM[0] != "gtk4" {
+		t.Fatalf("unexpected Linux GUI dependencies: %+v", cfg.Linux.Depends)
+	}
 	cfg.MacOS.Format = "dmg"
 	cfg.MacOS.Sign.Enabled = true
 	if err := cfg.validate(); err == nil {

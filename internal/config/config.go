@@ -16,6 +16,7 @@ var (
 	dshVersionPattern  = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]*$`)
 	packagePattern     = regexp.MustCompile(`^(?:@[0-9A-Za-z._-]+/)?[0-9A-Za-z._-]+$`)
 	bundleIDPattern    = regexp.MustCompile(`^[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)+$`)
+	linuxNamePattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*$`)
 )
 
 type Config struct {
@@ -25,6 +26,8 @@ type Config struct {
 	Node    Node     `yaml:"node"`
 	DSH     DSH      `yaml:"dsh"`
 	MacOS   MacOS    `yaml:"macos,omitempty"`
+	Windows Windows  `yaml:"windows,omitempty"`
+	Linux   Linux    `yaml:"linux,omitempty"`
 	Runtime Runtime  `yaml:"runtime"`
 	Targets []Target `yaml:"targets"`
 }
@@ -51,6 +54,30 @@ type MacOS struct {
 type Signing struct {
 	Enabled  bool   `yaml:"enabled"`
 	Identity string `yaml:"identity,omitempty"`
+}
+
+type Windows struct {
+	Format       string `yaml:"format,omitempty"`
+	AppName      string `yaml:"app_name,omitempty"`
+	Publisher    string `yaml:"publisher,omitempty"`
+	InstallScope string `yaml:"install_scope,omitempty"`
+}
+
+type Linux struct {
+	Formats     []string          `yaml:"formats,omitempty"`
+	PackageName string            `yaml:"package_name,omitempty"`
+	AppName     string            `yaml:"app_name,omitempty"`
+	Maintainer  string            `yaml:"maintainer,omitempty"`
+	Description string            `yaml:"description,omitempty"`
+	Vendor      string            `yaml:"vendor,omitempty"`
+	Homepage    string            `yaml:"homepage,omitempty"`
+	License     string            `yaml:"license,omitempty"`
+	Depends     LinuxDependencies `yaml:"depends,omitempty"`
+}
+
+type LinuxDependencies struct {
+	Deb []string `yaml:"deb,omitempty"`
+	RPM []string `yaml:"rpm,omitempty"`
 }
 
 type Runtime struct {
@@ -106,6 +133,45 @@ func (cfg *Config) setDefaults() {
 	if cfg.MacOS.VolumeName == "" {
 		cfg.MacOS.VolumeName = cfg.MacOS.AppName
 	}
+	if cfg.Windows.Format == "" {
+		cfg.Windows.Format = "zip"
+	}
+	if cfg.Windows.AppName == "" {
+		cfg.Windows.AppName = "DeepSeek Harness"
+	}
+	if cfg.Windows.Publisher == "" {
+		cfg.Windows.Publisher = "DeepSeek AI"
+	}
+	if cfg.Windows.InstallScope == "" {
+		cfg.Windows.InstallScope = "user"
+	}
+	if cfg.Linux.Formats == nil {
+		cfg.Linux.Formats = []string{"tar.gz"}
+	}
+	if cfg.Linux.PackageName == "" {
+		cfg.Linux.PackageName = "dsh"
+	}
+	if cfg.Linux.AppName == "" {
+		cfg.Linux.AppName = "DeepSeek Harness"
+	}
+	if cfg.Linux.Maintainer == "" {
+		cfg.Linux.Maintainer = "DeepSeek Harness <noreply@deepseek.com>"
+	}
+	if cfg.Linux.Description == "" {
+		cfg.Linux.Description = "DeepSeek Harness desktop client"
+	}
+	if cfg.Linux.Vendor == "" {
+		cfg.Linux.Vendor = "DeepSeek AI"
+	}
+	if cfg.Linux.License == "" {
+		cfg.Linux.License = "MIT"
+	}
+	if cfg.Linux.Depends.Deb == nil {
+		cfg.Linux.Depends.Deb = []string{"libgtk-4-1", "libwebkitgtk-6.0-4"}
+	}
+	if cfg.Linux.Depends.RPM == nil {
+		cfg.Linux.Depends.RPM = []string{"gtk4", "webkitgtk6.0"}
+	}
 }
 
 func (cfg Config) ModeFor(target Target) string {
@@ -151,6 +217,39 @@ func (cfg Config) validate() error {
 	if !bundleIDPattern.MatchString(cfg.MacOS.BundleID) {
 		return errors.New("macos.bundle_id contains invalid characters")
 	}
+	if cfg.Windows.Format != "zip" && cfg.Windows.Format != "nsis" {
+		return errors.New("windows.format must be zip or nsis")
+	}
+	if cfg.Windows.InstallScope != "user" && cfg.Windows.InstallScope != "machine" {
+		return errors.New("windows.install_scope must be user or machine")
+	}
+	if !validNSISValue(cfg.Windows.AppName) || !validNSISValue(cfg.Windows.Publisher) {
+		return errors.New(`windows.app_name and windows.publisher cannot contain quotes, backslashes, $, or newlines`)
+	}
+	if !linuxNamePattern.MatchString(cfg.Linux.PackageName) {
+		return errors.New("linux.package_name must be a lowercase package name")
+	}
+	if strings.TrimSpace(cfg.Linux.AppName) == "" || strings.ContainsAny(cfg.Linux.AppName, "\r\n") {
+		return errors.New("linux.app_name cannot be blank or contain newlines")
+	}
+	if len(cfg.Linux.Formats) == 0 {
+		return errors.New("linux.formats requires at least one format")
+	}
+	seenFormats := make(map[string]bool, len(cfg.Linux.Formats))
+	for _, format := range cfg.Linux.Formats {
+		if format != "tar.gz" && format != "deb" && format != "rpm" {
+			return fmt.Errorf("unsupported linux format %q", format)
+		}
+		if seenFormats[format] {
+			return fmt.Errorf("duplicate linux format %q", format)
+		}
+		seenFormats[format] = true
+	}
+	for _, dependency := range append(append([]string{}, cfg.Linux.Depends.Deb...), cfg.Linux.Depends.RPM...) {
+		if strings.TrimSpace(dependency) == "" {
+			return errors.New("linux dependencies cannot contain an empty value")
+		}
+	}
 	if cfg.Runtime.Host != "127.0.0.1" {
 		return errors.New("runtime.host must be 127.0.0.1")
 	}
@@ -180,6 +279,10 @@ func (cfg Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func validNSISValue(value string) bool {
+	return strings.TrimSpace(value) != "" && !strings.ContainsAny(value, "\r\n\"\\$")
 }
 
 func supportedTarget(target Target) bool {

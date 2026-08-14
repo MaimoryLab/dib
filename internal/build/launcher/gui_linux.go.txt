@@ -1,0 +1,88 @@
+package main
+
+/*
+#cgo pkg-config: gtk4 webkitgtk-6.0
+
+#include <stdlib.h>
+#include <gtk/gtk.h>
+#include <webkit/webkit.h>
+
+typedef struct {
+	GtkWidget *window;
+	gint stopped;
+} DSHWindow;
+
+static void dsh_stop_window(DSHWindow *window) {
+	g_atomic_int_set(&window->stopped, 1);
+	g_main_context_wakeup(g_main_context_default());
+}
+
+static gboolean dsh_close_window(GtkWindow *window, gpointer data) {
+	(void)window;
+	dsh_stop_window((DSHWindow *)data);
+	return TRUE;
+}
+
+static DSHWindow *dsh_window_new(const char *title, const char *url) {
+	if (!gtk_init_check()) {
+		return NULL;
+	}
+	DSHWindow *window = g_new0(DSHWindow, 1);
+	window->window = gtk_window_new();
+	GtkWidget *webview = webkit_web_view_new();
+	gtk_window_set_title(GTK_WINDOW(window->window), title);
+	gtk_window_set_default_size(GTK_WINDOW(window->window), 1280, 800);
+	gtk_window_set_child(GTK_WINDOW(window->window), webview);
+	webkit_web_view_load_uri(WEBKIT_WEB_VIEW(webview), url);
+	g_signal_connect(window->window, "close-request", G_CALLBACK(dsh_close_window), window);
+	return window;
+}
+
+static void dsh_window_run(DSHWindow *window) {
+	gtk_window_present(GTK_WINDOW(window->window));
+	while (!g_atomic_int_get(&window->stopped)) {
+		g_main_context_iteration(NULL, TRUE);
+	}
+}
+
+static void dsh_window_terminate(DSHWindow *window) {
+	dsh_stop_window(window);
+}
+
+static void dsh_window_destroy(DSHWindow *window) {
+	gtk_window_destroy(GTK_WINDOW(window->window));
+	g_free(window);
+}
+*/
+import "C"
+
+import (
+	"errors"
+	"runtime"
+	"unsafe"
+)
+
+type guiWindow struct {
+	window *C.DSHWindow
+}
+
+func newGUIWindow(url string) (*guiWindow, error) {
+	runtime.LockOSThread()
+	titleCString := C.CString("DeepSeek Harness")
+	urlCString := C.CString(url)
+	defer C.free(unsafe.Pointer(titleCString))
+	defer C.free(unsafe.Pointer(urlCString))
+	window := C.dsh_window_new(titleCString, urlCString)
+	if window == nil {
+		runtime.UnlockOSThread()
+		return nil, errors.New("initialize GTK4 display")
+	}
+	return &guiWindow{window: window}, nil
+}
+
+func (w *guiWindow) run()       { C.dsh_window_run(w.window) }
+func (w *guiWindow) terminate() { C.dsh_window_terminate(w.window) }
+func (w *guiWindow) destroy() {
+	C.dsh_window_destroy(w.window)
+	runtime.UnlockOSThread()
+}

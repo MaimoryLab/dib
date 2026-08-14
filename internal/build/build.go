@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/MaimoryLab/dib/internal/config"
+	"go.yaml.in/yaml/v3"
 )
 
 //go:embed launcher/*.txt
@@ -71,13 +72,32 @@ func buildTarget(ctx context.Context, cfg config.Config, target config.Target) e
 	if err := os.MkdirAll(cfg.Output, 0o755); err != nil {
 		return err
 	}
-	if appPath != "" {
-		return writeDMG(ctx, cfg, name, dmgRoot, appPath)
-	}
-	if target.OS == "windows" {
+	switch target.OS {
+	case "windows":
+		if cfg.Windows.Format == "nsis" {
+			return writeNSIS(ctx, cfg, target, name, root)
+		}
 		return writeZip(filepath.Join(cfg.Output, name+".zip"), work, name)
+	case "darwin":
+		if appPath != "" {
+			return writeDMG(ctx, cfg, name, dmgRoot, appPath)
+		}
+		return writeTarGz(filepath.Join(cfg.Output, name+".tar.gz"), work, name)
+	case "linux":
+		for _, format := range cfg.Linux.Formats {
+			if format == "tar.gz" {
+				if err := writeTarGz(filepath.Join(cfg.Output, name+".tar.gz"), work, name); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := writeLinuxPackage(ctx, cfg, target, name, root, format); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	return writeTarGz(filepath.Join(cfg.Output, name+".tar.gz"), work, name)
+	return fmt.Errorf("unsupported target OS %q", target.OS)
 }
 
 func installNode(ctx context.Context, cfg config.Config, target config.Target, dst string) error {
@@ -124,7 +144,15 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 		return err
 	}
 	defer os.RemoveAll(sourceDir)
-	files := []string{"main.go.txt", cfg.ModeFor(target) + ".go.txt"}
+	mode := cfg.ModeFor(target)
+	files := []string{"main.go.txt", mode + ".go.txt"}
+	if mode == "gui" {
+		backend := "gui_webview.go.txt"
+		if target.OS == "linux" {
+			backend = "gui_linux.go.txt"
+		}
+		files = append(files, backend)
+	}
 	for _, name := range files {
 		data, err := launcherFiles.ReadFile("launcher/" + name)
 		if err != nil {
@@ -135,7 +163,7 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 		}
 	}
 	mod := "module dib-launcher\n\ngo 1.23\n"
-	if cfg.ModeFor(target) == "gui" {
+	if mode == "gui" && target.OS != "linux" {
 		mod += "\nrequire github.com/webview/webview_go v0.0.0-20240831120633-6173450d4dd6\n"
 	}
 	if err := os.WriteFile(filepath.Join(sourceDir, "go.mod"), []byte(mod), 0o644); err != nil {
@@ -149,13 +177,13 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 		output += ".exe"
 	}
 	ldflags := fmt.Sprintf("-s -w -X main.host=%s -X main.port=%d -X main.dshPackage=%s", cfg.Runtime.Host, cfg.Runtime.Port, cfg.DSH.Package)
-	if target.OS == "windows" && cfg.ModeFor(target) == "gui" {
+	if target.OS == "windows" && mode == "gui" {
 		ldflags += " -H windowsgui"
 	}
 	cmd := exec.CommandContext(ctx, "go", "build", "-mod=mod", "-trimpath", "-ldflags", ldflags, "-o", output, ".")
 	cmd.Dir = sourceDir
 	cmd.Env = append(os.Environ(), "GOOS="+target.OS, "GOARCH="+target.Arch)
-	if cfg.ModeFor(target) == "gui" {
+	if mode == "gui" {
 		cmd.Env = append(cmd.Env, "CGO_ENABLED=1")
 		if target.CC != "" {
 			cmd.Env = append(cmd.Env, "CC="+target.CC)
@@ -247,6 +275,199 @@ func codesign(ctx context.Context, identity, path string, deep bool) error {
 		return fmt.Errorf("verify signature for %s: %w: %s", filepath.Base(path), err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func writeNSIS(ctx context.Context, cfg config.Config, target config.Target, name, root string) error {
+	if _, err := exec.LookPath("makensis"); err != nil {
+		return errors.New("makensis is required for windows.format: nsis")
+	}
+	script := nsisScript(cfg, target)
+	work := filepath.Dir(root)
+	scriptPath := filepath.Join(work, "installer.nsi")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+		return err
+	}
+	output := filepath.Join(cfg.Output, name+"-installer.exe")
+	cmd := exec.CommandContext(ctx, "makensis", "-WX", "-DPAYLOAD="+root, "-DOUTFILE="+output, scriptPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("create NSIS installer: %w", err)
+	}
+	return nil
+}
+
+func nsisScript(cfg config.Config, target config.Target) string {
+	scope := "SetShellVarContext current"
+	registry := "HKCU"
+	installDir := `$LOCALAPPDATA\Programs\${PRODUCT}`
+	requestLevel := "user"
+	if cfg.Windows.InstallScope == "machine" {
+		scope = "SetShellVarContext all"
+		registry = "HKLM"
+		installDir = `$PROGRAMFILES64\${PUBLISHER}\${PRODUCT}`
+		requestLevel = "admin"
+	}
+	archCheck := `${IfNot} ${IsNativeAMD64}`
+	if target.Arch == "arm64" {
+		archCheck = `${IfNot} ${IsNativeARM64}`
+	}
+	return fmt.Sprintf(`Unicode true
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
+!include "WinVer.nsh"
+!include "x64.nsh"
+
+!define PRODUCT "%s"
+!define PUBLISHER "%s"
+!define VERSION "%s"
+!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DSH"
+
+Name "${PRODUCT}"
+OutFile "${OUTFILE}"
+InstallDir "%s"
+RequestExecutionLevel %s
+SetCompressor /SOLID lzma
+ManifestDPIAware true
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_LANGUAGE "English"
+
+Function .onInit
+  ${IfNot} ${AtLeastWin10}
+    MessageBox MB_OK|MB_ICONSTOP "${PRODUCT} requires Windows 10 or later."
+    Abort
+  ${EndIf}
+  %s
+    MessageBox MB_OK|MB_ICONSTOP "This installer requires Windows %s."
+    Abort
+  ${EndIf}
+  SetRegView 64
+  ReadRegStr $0 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+  ReadRegStr $1 HKCU "Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+  ${If} $0 == ""
+  ${AndIf} $1 == ""
+    MessageBox MB_OK|MB_ICONSTOP "${PRODUCT} requires the Microsoft Edge WebView2 Runtime."
+    Abort
+  ${EndIf}
+FunctionEnd
+
+Section "Install"
+  %s
+  SetRegView 64
+  SetOutPath "$INSTDIR"
+  File /r "${PAYLOAD}\*"
+  WriteUninstaller "$INSTDIR\uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\${PRODUCT}"
+  CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\dshbox.exe"
+  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\dshbox.exe"
+  WriteRegStr %s "${UNINSTALL_KEY}" "DisplayName" "${PRODUCT}"
+  WriteRegStr %s "${UNINSTALL_KEY}" "Publisher" "${PUBLISHER}"
+  WriteRegStr %s "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
+  WriteRegStr %s "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\dshbox.exe"
+  WriteRegStr %s "${UNINSTALL_KEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+  WriteRegStr %s "${UNINSTALL_KEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
+SectionEnd
+
+Section "Uninstall"
+  %s
+  SetRegView 64
+  Delete "$DESKTOP\${PRODUCT}.lnk"
+  RMDir /r "$SMPROGRAMS\${PRODUCT}"
+  DeleteRegKey %s "${UNINSTALL_KEY}"
+  RMDir /r "$INSTDIR"
+SectionEnd
+`, cfg.Windows.AppName, cfg.Windows.Publisher, cfg.DSH.Version, installDir, requestLevel, archCheck, target.Arch, scope, registry, registry, registry, registry, registry, registry, scope, registry)
+}
+
+type nfpmConfig struct {
+	Name        string                   `yaml:"name"`
+	Arch        string                   `yaml:"arch"`
+	Platform    string                   `yaml:"platform"`
+	Version     string                   `yaml:"version"`
+	Release     string                   `yaml:"release"`
+	Section     string                   `yaml:"section"`
+	Priority    string                   `yaml:"priority"`
+	Maintainer  string                   `yaml:"maintainer"`
+	Description string                   `yaml:"description"`
+	Vendor      string                   `yaml:"vendor"`
+	Homepage    string                   `yaml:"homepage,omitempty"`
+	License     string                   `yaml:"license"`
+	Depends     []string                 `yaml:"depends,omitempty"`
+	Overrides   map[string]nfpmOverrides `yaml:"overrides,omitempty"`
+	Contents    []nfpmContent            `yaml:"contents"`
+}
+
+type nfpmOverrides struct {
+	Depends []string `yaml:"depends,omitempty"`
+}
+
+type nfpmContent struct {
+	Source string `yaml:"src"`
+	Dest   string `yaml:"dst"`
+	Type   string `yaml:"type,omitempty"`
+}
+
+func writeLinuxPackage(ctx context.Context, cfg config.Config, target config.Target, name, root, format string) error {
+	if _, err := exec.LookPath("nfpm"); err != nil {
+		return errors.New("nfpm is required for linux deb/rpm packages")
+	}
+	work := filepath.Dir(root)
+	desktopPath := filepath.Join(work, cfg.Linux.PackageName+".desktop")
+	terminal := "false"
+	if cfg.ModeFor(target) == "serve" {
+		terminal = "true"
+	}
+	desktop := fmt.Sprintf("[Desktop Entry]\nVersion=1.0\nName=%s\nExec=/opt/%s/dshbox\nTerminal=%s\nType=Application\nCategories=Development;\n", cfg.Linux.AppName, cfg.Linux.PackageName, terminal)
+	if err := os.WriteFile(desktopPath, []byte(desktop), 0o644); err != nil {
+		return err
+	}
+	nfpm := newNFPMConfig(cfg, target, root, desktopPath)
+	data, err := yaml.Marshal(nfpm)
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(work, "nfpm.yaml")
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		return err
+	}
+	output := filepath.Join(cfg.Output, name+"."+format)
+	cmd := exec.CommandContext(ctx, "nfpm", "package", "--config", configPath, "--packager", format, "--target", output)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("create %s package: %w", format, err)
+	}
+	return nil
+}
+
+func newNFPMConfig(cfg config.Config, target config.Target, root, desktopPath string) nfpmConfig {
+	installRoot := "/opt/" + cfg.Linux.PackageName
+	return nfpmConfig{
+		Name:        cfg.Linux.PackageName,
+		Arch:        target.Arch,
+		Platform:    "linux",
+		Version:     cfg.DSH.Version,
+		Release:     "1",
+		Section:     "devel",
+		Priority:    "optional",
+		Maintainer:  cfg.Linux.Maintainer,
+		Description: cfg.Linux.Description,
+		Vendor:      cfg.Linux.Vendor,
+		Homepage:    cfg.Linux.Homepage,
+		License:     cfg.Linux.License,
+		Depends:     cfg.Linux.Depends.Deb,
+		Overrides:   map[string]nfpmOverrides{"rpm": {Depends: cfg.Linux.Depends.RPM}},
+		Contents: []nfpmContent{
+			{Source: filepath.ToSlash(root) + "/", Dest: installRoot, Type: "tree"},
+			{Source: installRoot + "/dshbox", Dest: "/usr/bin/dshbox", Type: "symlink"},
+			{Source: desktopPath, Dest: "/usr/share/applications/" + cfg.Linux.PackageName + ".desktop"},
+		},
+	}
 }
 
 func cachedDownload(ctx context.Context, cacheDir, url, sumsURL, filename string) (string, error) {

@@ -21,6 +21,26 @@ macos:
     enabled: false
     # identity: "Developer ID Application: Example Corp (TEAMID)"
 
+windows:
+  format: nsis
+  app_name: DeepSeek Harness
+  publisher: DeepSeek AI
+  # user avoids UAC; machine installs under Program Files.
+  install_scope: user
+
+linux:
+  formats: [deb, rpm]
+  package_name: dsh
+  app_name: DeepSeek Harness
+  maintainer: DeepSeek Harness <noreply@deepseek.com>
+  description: DeepSeek Harness desktop client
+  vendor: DeepSeek AI
+  homepage: https://github.com/deepseek-ai/deepseek-harness
+  license: MIT
+  depends:
+    deb: [libgtk-4-1, libwebkitgtk-6.0-4]
+    rpm: [gtk4, webkitgtk6.0]
+
 runtime:
   # gui uses the OS WebView; serve only starts the Web UI server.
   mode: gui

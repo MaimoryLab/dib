@@ -1,0 +1,26 @@
+package main
+
+import (
+	"errors"
+
+	webview "github.com/webview/webview_go"
+)
+
+type guiWindow struct {
+	webview.WebView
+}
+
+func newGUIWindow(url string) (*guiWindow, error) {
+	w := webview.New(false)
+	if w == nil {
+		return nil, errors.New("create system WebView")
+	}
+	w.SetTitle("DeepSeek Harness")
+	w.SetSize(1280, 800, webview.HintNone)
+	w.Navigate(url)
+	return &guiWindow{WebView: w}, nil
+}
+
+func (w *guiWindow) run()       { w.Run() }
+func (w *guiWindow) terminate() { w.Terminate() }
+func (w *guiWindow) destroy()   { w.Destroy() }

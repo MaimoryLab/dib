@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	webview "github.com/webview/webview_go"
 )
 
 var errServerExited = errors.New("server exited without opening the Web UI")
@@ -30,18 +28,19 @@ func run() error {
 		return err
 	}
 
-	w := webview.New(false)
-	defer w.Destroy()
-	w.SetTitle("DeepSeek Harness")
-	w.SetSize(1280, 800, webview.HintNone)
-	w.Navigate(url)
+	w, err := newGUIWindow(url)
+	if err != nil {
+		_ = server.Process.Kill()
+		return err
+	}
+	defer w.destroy()
 	serverStopped := make(chan struct{})
 	go func() {
 		<-exited
 		close(serverStopped)
-		w.Terminate()
+		w.terminate()
 	}()
-	w.Run()
+	w.run()
 
 	select {
 	case <-serverStopped:
