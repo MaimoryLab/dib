@@ -10,7 +10,8 @@ dsh:
   package: "@deepseek-ai/dsh"
   version: 0.1.0-rc.6
   # Prebuilt npm package specs added here are installed into the runtime.
-  plugins: []
+  plugins:
+    - ./plugins/dsh-desktop
 
 macos:
   format: dmg
