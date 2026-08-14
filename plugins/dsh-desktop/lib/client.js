@@ -78,7 +78,6 @@ class DesktopRuntime extends Service {
       ['menu', () => hasBridges('dshboxMenuRegister', 'dshboxMenuUnregister')],
       ['files.drop', () => window.dshboxFilesDrop === true],
       ['notification', () => hasBridges('dshboxNotify')],
-      ['tray', () => hasBridges('dshboxTraySet', 'dshboxTrayClear', 'dshboxTrayShow', 'dshboxTrayHide', 'dshboxTrayQuit')],
       ['files.choose', () => hasBridges('dshboxChooseFiles')],
       ['external.open', () => hasBridges('dshboxOpenExternal')],
     ].flatMap(([capability, available]) => available() ? [capability] : []))
@@ -93,14 +92,6 @@ class DesktopRuntime extends Service {
   notify(options) {
     if (typeof options?.title !== 'string' || typeof options.body !== 'string' || !options.title.trim() || !options.body.trim() || options.title.length > 256 || options.body.length > 4096) return Promise.reject(new TypeError('invalid notification text'))
     return bridge('dshboxNotify', options)
-  }
-
-  tray = {
-    set: options => bridge('dshboxTraySet', options ?? {}),
-    clear: () => bridge('dshboxTrayClear'),
-    show: () => bridge('dshboxTrayShow'),
-    hide: () => bridge('dshboxTrayHide'),
-    quit: () => bridge('dshboxTrayQuit'),
   }
 
   files = {

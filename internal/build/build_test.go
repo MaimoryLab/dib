@@ -287,6 +287,9 @@ func TestDesktopPluginPatchAndClientRegistration(t *testing.T) {
 	if strings.Contains(string(client), "ctx.provide('desktop', desktop)") {
 		t.Fatal("desktop client registers its Service twice")
 	}
+	if strings.Contains(string(client), "dshboxTray") || strings.Contains(string(client), "tray =") {
+		t.Fatal("desktop client still exposes the launcher-owned tray")
+	}
 }
 
 func TestPluginPatchResolvesLocalPackagesAndRejectsUnknownSpecs(t *testing.T) {

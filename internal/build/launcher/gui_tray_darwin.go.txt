@@ -4,21 +4,81 @@ package main
 #cgo darwin CFLAGS: -x objective-c
 #cgo darwin LDFLAGS: -framework Cocoa
 #import <Cocoa/Cocoa.h>
-#include <stdlib.h>
+
+@interface DSHTrayController : NSObject <NSWindowDelegate>
+@property(nonatomic, assign) NSWindow *window;
+@property(nonatomic, retain) id originalDelegate;
+@property(nonatomic, assign) BOOL exiting;
+@end
 
 static NSStatusItem *dsh_tray_item;
+static DSHTrayController *dsh_tray_controller;
 
-static int dsh_tray_set(const char *title, const char *tooltip) {
-	NSStatusBar *bar = [NSStatusBar systemStatusBar];
-	if (bar == nil) return 0;
+@implementation DSHTrayController
+- (BOOL)windowShouldClose:(id)sender {
+	(void)sender;
+	if (self.exiting) return YES;
+	[self.window orderOut:nil];
+	return NO;
+}
+
+- (void)windowWillClose:(NSNotification *)notification {
+	if ([self.originalDelegate respondsToSelector:@selector(windowWillClose:)]) {
+		[self.originalDelegate windowWillClose:notification];
+	}
+	self.window = nil;
+}
+
+- (void)trayClicked:(id)sender {
+	(void)sender;
+	if ([NSApp currentEvent].type == NSEventTypeRightMouseUp) {
+		NSMenu *menu = [[NSMenu alloc] init];
+		NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"Quit DeepSeek Harness"
+			action:@selector(quit:) keyEquivalent:@""];
+		quit.target = self;
+		[menu addItem:quit];
+		[NSMenu popUpContextMenu:menu withEvent:[NSApp currentEvent] forView:dsh_tray_item.button];
+		[quit release];
+		[menu release];
+		return;
+	}
+	[NSApp unhide:nil];
+	[self.window makeKeyAndOrderFront:nil];
+	[NSApp activateIgnoringOtherApps:YES];
+}
+
+- (void)quit:(id)sender {
+	(void)sender;
+	self.exiting = YES;
+	[self.window performClose:nil];
+}
+
+- (void)dealloc {
+	[_originalDelegate release];
+	[super dealloc];
+}
+@end
+
+static int dsh_tray_init(void *handle) {
+	NSWindow *window = (NSWindow *)handle;
+	if (window == nil) return 0;
+	dsh_tray_controller = [[DSHTrayController alloc] init];
+	dsh_tray_controller.window = window;
+	dsh_tray_controller.originalDelegate = window.delegate;
+	window.delegate = dsh_tray_controller;
+
+	dsh_tray_item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
 	if (dsh_tray_item == nil) {
-		dsh_tray_item = [bar statusItemWithLength:NSVariableStatusItemLength];
+		window.delegate = dsh_tray_controller.originalDelegate;
+		[dsh_tray_controller release];
+		dsh_tray_controller = nil;
+		return 0;
 	}
 	NSButton *button = dsh_tray_item.button;
-	NSString *buttonTitle = title == NULL ? @"" : [NSString stringWithUTF8String:title];
-	NSString *buttonTooltip = tooltip == NULL ? @"" : [NSString stringWithUTF8String:tooltip];
-	button.title = buttonTitle ?: @"";
-	button.toolTip = buttonTooltip ?: @"";
+	button.toolTip = @"DeepSeek Harness";
+	button.target = dsh_tray_controller;
+	button.action = @selector(trayClicked:);
+	[button sendActionOn:NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp];
 	NSImage *icon = [[NSApp applicationIconImage] copy];
 	if (icon != nil) {
 		icon.template = YES;
@@ -28,34 +88,16 @@ static int dsh_tray_set(const char *title, const char *tooltip) {
 	return 1;
 }
 
-static int dsh_tray_clear(void) {
-	if (dsh_tray_item == nil) return 1;
-	[[NSStatusBar systemStatusBar] removeStatusItem:dsh_tray_item];
-	dsh_tray_item = nil;
-	return 1;
-}
-
-static int dsh_tray_show(void) {
-	[NSApp unhide:nil];
-	[NSApp activateIgnoringOtherApps:YES];
-	return 1;
-}
-
-static int dsh_tray_hide(void) {
-	[NSApp hide:nil];
-	return 1;
-}
-
-static int dsh_tray_terminate(void) {
-	NSWindow *window = [NSApp mainWindow];
-	if (window == nil) window = [[NSApp windows] firstObject];
-	if (window == nil) return 0;
-	[window performClose:nil];
-	return 1;
-}
-
-static void dsh_tray_attach(void *handle) {
-	(void)handle;
+static void dsh_tray_clear(void) {
+	if (dsh_tray_controller != nil && dsh_tray_controller.window.delegate == dsh_tray_controller) {
+		dsh_tray_controller.window.delegate = dsh_tray_controller.originalDelegate;
+	}
+	if (dsh_tray_item != nil) {
+		[[NSStatusBar systemStatusBar] removeStatusItem:dsh_tray_item];
+		dsh_tray_item = nil;
+	}
+	[dsh_tray_controller release];
+	dsh_tray_controller = nil;
 }
 */
 import "C"
@@ -65,45 +107,11 @@ import (
 	"unsafe"
 )
 
-func nativeTraySupported() bool { return true }
-
-func nativeTrayAttach(handle unsafe.Pointer) { C.dsh_tray_attach(handle) }
-
-func nativeTraySet(title, tooltip string) error {
-	titleValue := C.CString(title)
-	tooltipValue := C.CString(tooltip)
-	defer C.free(unsafe.Pointer(titleValue))
-	defer C.free(unsafe.Pointer(tooltipValue))
-	if C.dsh_tray_set(titleValue, tooltipValue) == 0 {
+func nativeTrayInit(handle unsafe.Pointer) error {
+	if C.dsh_tray_init(handle) == 0 {
 		return errors.New("create macOS menu-bar icon")
 	}
 	return nil
 }
 
-func nativeTrayClear() error {
-	if C.dsh_tray_clear() == 0 {
-		return errors.New("remove macOS menu-bar icon")
-	}
-	return nil
-}
-
-func nativeTrayShow() error {
-	if C.dsh_tray_show() == 0 {
-		return errors.New("show dsh window")
-	}
-	return nil
-}
-
-func nativeTrayHide() error {
-	if C.dsh_tray_hide() == 0 {
-		return errors.New("hide dsh window")
-	}
-	return nil
-}
-
-func nativeTrayTerminate() error {
-	if C.dsh_tray_terminate() == 0 {
-		return errors.New("close dsh window")
-	}
-	return nil
-}
+func nativeTrayClear() { C.dsh_tray_clear() }

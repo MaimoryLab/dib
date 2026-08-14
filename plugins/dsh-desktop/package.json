@@ -27,7 +27,8 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "*"
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-tools": "*"
   },
   "files": ["lib/index.js", "lib/index.d.ts", "lib/client.js", "lib/client.d.ts", "README.md"]
 }

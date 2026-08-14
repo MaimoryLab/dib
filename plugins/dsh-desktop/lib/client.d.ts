@@ -17,13 +17,6 @@ export interface DesktopService {
   supported(capability: string): boolean
   menu: DesktopMenu
   notify(options: { title: string; body: string }): Promise<void>
-  tray: {
-    set(options?: { title?: string; tooltip?: string }): Promise<void>
-    clear(): Promise<void>
-    show(): Promise<void>
-    hide(): Promise<void>
-    quit(): Promise<void>
-  }
   files: {
     choose(options?: { multiple?: boolean }): Promise<string[]>
     onDrop(handler: (paths: string[]) => void): () => void

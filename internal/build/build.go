@@ -476,7 +476,9 @@ func buildLauncher(ctx context.Context, cfg config.Config, target config.Target,
 		if target.OS == "windows" || target.OS == "darwin" {
 			files = append(files, "gui_menu_"+target.OS+".go.txt", "gui_menu_action.go.txt")
 		}
-		files = append(files, "gui_tray_"+target.OS+".go.txt")
+		if target.OS != "linux" {
+			files = append(files, "gui_tray_"+target.OS+".go.txt")
+		}
 	}
 	for _, name := range files {
 		data, err := launcherFiles.ReadFile("launcher/" + name)
